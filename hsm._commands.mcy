@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+fun abortWithMsg(msg) =
+//dump msg;
+//dumpCallstack nil;
+	setError(msgError msg);
+	abort;;
+
+fun abortWhenNil(value, msg)= if value<>nil then value else abortWithMsg(msg);;
+
+//----------------------- PARSING
+const ASCII_DOUBLE_QUOTE = 0x22;;
+const ASCII_BACKSLASH = 0x5c;;
+
+// in order to distinguish hexa arguments and ascii arguments we force the user to type ascii arguments within double-quotes
+// the word splitter keeps this: ascii arguments keep their double-quotes
+// function msgFilter cnx will check this and convert ascii arguments to string when needed, using strFromSource
+fun _nextDoubleQuote(str, i)=
+	if i<strLength(str) then
+	let strGet(str, i) -> c in
+	if c==ASCII_DOUBLE_QUOTE then i
+	else _nextDoubleQuote(str, i+if c==ASCII_BACKSLASH then 2 else 1);;
+
+fun _splitWords(str, i) =
+	if i<strLength(str) then
+	let strGet(str, i) -> c in
+	if c<=32 then _splitWords(str, i+1)
+	else 
+	if c==ASCII_DOUBLE_QUOTE then
+		let _nextDoubleQuote(str, i+1) -> j in
+		if j==nil then abortWithMsg(strFormat("NOK: missing ending double-quote after *", strTail(str, i)))
+		else
+		strSlice(str, i, j+1-i)::_splitWords(str, j+1)
+	else
+		let strCharPos(str, 32, i+1) -> j in
+		let if j<>nil then j else strLength(str) -> j in
+		strSlice(str, i, j-i)::_splitWords(str, j);;
+
+fun splitWords(str) = _splitWords(str, 0);;
+
+fun splitMultiCommandsLine(words, tmpLine) =
+	if words==nil then (if tmpLine<>nil then listReverse(tmpLine)::nil)
+	else if head(words)==";" then listReverse(tmpLine)::splitMultiCommandsLine(tail(words), nil)
+	else splitMultiCommandsLine(tail(words), head(words)::tmpLine);;
+
+fun msgFilter(cnx, arg) = 
+	if arg<>nil then
+	if arg=="*" then msgFilter(cnx, (if cnx.lastResultC<>"*" then cnx.lastResultC))
+	else if strGet(arg, 0) == ASCII_DOUBLE_QUOTE then strFromSource(arg)
+	else if isHex(arg) then strFromHex(arg)
+	else
+	abortWithMsg(strFormat("NOK: hexadecimal expected, found '*'. Use double-quote for ascii value: *", arg, sourceFromStr(arg)));;
+
+//============== Commands
+
+fun _cmdFinalizeResult(cnx, result)=
+	if result==nil then abortWithMsg("NOK: no result")
+	else (
+		cnxEchoLn(cnx, cnxSetResult(cnx, hexFromStr(result)));
+		cnxEchoLn(cnx, "OK");
+	);;
+
+fun _cmdFinalizeAsciiResult(cnx, result)=
+	if result==nil then abortWithMsg("NOK: no result")
+	else (
+		cnxSetResult(cnx, sourceFromStr(result));
+		cnxEchoLn(cnx, result);
+		cnxEchoLn(cnx, "OK");
+	);;
+//-------------- help
+fun cmdHelp(cnx)=
+	cnxEchoLn(cnx, HELP_TEXT);
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdSilent(cnx)=
+	cnxSetSilent(true, cnx);
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdVerbose(cnx)=
+	cnxSetSilent(false, cnx);
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdStar(cnx)=
+	if cnx.silentC then cnxEchoAlways(cnx, (if strGet(cnx.lastResultC, 0) == ASCII_DOUBLE_QUOTE then strFromSource(cnx.lastResultC) else cnx.lastResultC))
+	else cnxEchoLn(cnx, cnx.lastResultC);
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdPrint(cnx, msg)=
+	cnxEchoAlways(cnx, msgFilter(cnx, msg));;
+
+fun cmdDate(cnx)=
+	cnxEchoLn(cnx, cnxSetResult(cnx, sourceFromStr(fullDate(time()))));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdBufferStart(cnx, pattern)=
+	set cnx.bufferC=bufferCreate();
+	set cnx.bufferStopPatternC=if strEmpty(pattern) then "bufferEnd" else strFormat("bufferEnd *", pattern);
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdBufferEnd(cnx)=
+	set cnx.lastResultC=sourceFromStr(strFromBuffer(cnx.bufferC));
+	set cnx.bufferC=nil;
+	set cnx.bufferStopPatternC=nil;
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdProcessOneCommand(cnx, line) =
+	let line -> cmd::arg1::arg2::arg3::arg4::arg5::_ in
+	if (!strStartsWith(cmd, "//")) && (!strStartsWith(cmd, "#")) then
+	match cmd with
+//---------useful commands
+		"help" -> void cmdHelp(cnx),
+		"man" -> void cmdMan(cnx, arg1),
+		"keyTypes" -> void cmdKeyTypes(cnx),
+		"signatures" -> void cmdSignatures(cnx),
+		"curves" -> void cmdCurves(cnx),
+		"schemes" -> void cmdSchemes(cnx),
+		"paddings" -> void cmdPaddings(cnx),
+		"encodings" -> void cmdEncodings(cnx),
+		"hashTypes" -> void cmdHashTypes(cnx),
+//---------formatting
+		"silent" -> void cmdSilent(cnx),
+		"verbose" -> void cmdVerbose(cnx),
+		"*" -> void cmdStar(cnx),
+		"print" -> void cmdPrint(cnx, arg1),
+		"date" -> void cmdDate(cnx),
+//---------buffer
+		"bufferStart" -> void cmdBufferStart(cnx, arg1),
+		"bufferEnd" -> void cmdBufferEnd(cnx),
+//---------user commands
+		"self" -> void cmdSelf(cnx),
+		"logon" -> void cmdLogon(cnx, arg1, arg2),
+		"logout" -> void cmdLogout(cnx),
+		"password" -> void cmdPassword(cnx, arg1, arg2),
+		"userInfo" -> void cmdUserInfo(cnx, arg1),
+//---------encoding
+		"encode" -> void cmdEncode(cnx, arg1, arg2),
+		"decode" -> void cmdDecode(cnx, arg1, arg2),
+		"randomBytes"  -> void cmdRandomBytes(cnx, arg1),
+//---------hash
+		"hash" -> void cmdHash(cnx, arg1, arg2, arg3, arg4),
+//---------key commands
+		"describe" -> void cmdDescribe(cnx, arg1),		
+		"createKey" -> void cmdCreateKey(cnx, arg1, arg2, arg3),
+		"delKey" -> void cmdDelKey(cnx, arg1),
+		"publicKey" -> void cmdPublicKey(cnx, arg1),
+		"importKey" -> void cmdKeyImport(cnx, arg1, arg2, arg3),
+		"importSSH" -> void cmdKeyImportSSH(cnx, arg1, arg2),
+		"ecdh" -> void cmdEcdh(cnx, arg1, arg2),
+		"sign" -> void cmdSign(cnx, arg1, arg2, arg3, arg4),
+		"verify" -> void cmdVerify(cnx, arg1, arg2, arg3, arg4, arg5),
+		"pad" -> void cmdPad(cnx, arg1, arg2, arg3),
+		"unpad" -> void cmdUnpad(cnx, arg1, arg2, arg3),
+		"encrypt" -> void cmdEncrypt(cnx, arg1, arg2, arg3, arg4),
+		"decrypt" -> void cmdDecrypt(cnx, arg1, arg2, arg3, arg4),
+		"csr" -> void cmdCsr(cnx, arg1, arg2),
+//---------admin commands
+		"users" -> void cmdUsers(cnx),
+		"keys" -> void cmdKeys(cnx),
+		"addUser" -> void cmdAddUser(cnx, arg1),
+		"delUser" -> void cmdDelUser(cnx, arg1),
+		"userRights" -> void cmdUserRights(cnx, arg1, arg2),
+		"userPassword" -> void cmdUserPassword(cnx, arg1, arg2),
+		"userSSH" -> void cmdUserSSH(cnx, arg1, arg2),
+		"userTLS" -> void cmdUserTLS(cnx, arg1),
+		"exportKey" -> void cmdKeyExport(cnx, arg1, arg2),
+		"exportKeyPublic" -> void cmdKeyExportPublic(cnx, arg1),
+
+		"system" -> void sys(),
+		_ -> cnxEchoLn(cnx, "NOK: command unknown");;
+
+fun cmdProcessLine(cnx, line)=
+	if cnx.bufferC<>nil && line<>cnx.bufferStopPatternC then (
+		// buffer is always Ascii, as it is mostly used to import PEM files.
+		if bufferLength(cnx.bufferC)>0 then bufferAppend(cnx.bufferC, "\n");
+		bufferAppend(cnx.bufferC, line);
+		if bufferLength(cnx.bufferC)>BUFFER_MAX_LENGTH then (
+			set cnx.bufferC=nil;
+			set cnx.bufferStopPatternC=nil;
+			cnxEchoLn(cnx, "NOK: Buffer full");
+		)
+	)
+	else
+	try (
+		let strTrim(line) ->line in
+		if strEmpty(line) then cnxEchoLn(cnx, "OK")
+		else
+		let splitMultiCommandsLine(splitWords(line), nil) -> lines in
+		for line in lines do 
+		cmdProcessOneCommand(cnx, line)
+	)
+	else match lastError() with
+	msgError msg -> cnxEchoLn(cnx, msg);;

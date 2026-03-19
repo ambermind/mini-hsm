@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+enum ENCODE_HEX, ENCODE_ASCII, ENCODE_BASE64, ENCODE_BASE64URL;;
+const Encodings =
+	["ASCII", ENCODE_ASCII]::
+	["BASE64", ENCODE_BASE64]::
+	["BASE64URL", ENCODE_BASE64URL]::
+	["HEX", ENCODE_HEX]::
+	nil;;
+const EncodingsHashmap = hashmapInit(4, Encodings);;
+fun encodingFromStr(encoding) = abortWhenNil(hashmapGet(EncodingsHashmap, encoding), "NOK: unknown uncoding");;
+
+fun encode(encoding, msg)=
+	match encodingFromStr(encoding) with
+		ENCODE_HEX      -> hexFromStr(msg),
+		ENCODE_ASCII    -> sourceFromStr(msg),
+		ENCODE_BASE64   -> sourceFromStr(b64Encode(msg)),
+		ENCODE_BASE64URL-> sourceFromStr(urlFromB64(b64Encode(msg))),
+		_ -> abortWithMsg("NOK: incompatible encoding");;
+
+fun decode(encoding, msg)=
+	match encodingFromStr(encoding) with
+		ENCODE_HEX      -> abortWithMsg("NOK: HEX decoding is implicit"),
+		ENCODE_ASCII    -> abortWithMsg("NOK: ASCII decoding is implicit"),
+		ENCODE_BASE64   -> b64Decode(msg),
+		ENCODE_BASE64URL-> b64Decode(b64FromUrl(msg)),
+		_ -> abortWithMsg("NOK: incompatible encoding");;
+
+//-------------- commands
+fun cmdEncodings(cnx)=
+	for [encoding, _] in Encodings do cnxEchoLn(cnx, strFormat("- *", encoding));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdEncode(cnx, encoding, msg)=
+	let encode(encoding, msgFilter(cnx, msg)) -> result in
+	if result==nil then abortWithMsg("NOK: no result")
+	else (
+		cnxEchoLn(cnx, cnxSetResult(cnx, result));
+		cnxEchoLn(cnx, "OK");
+	);;
+
+fun cmdDecode(cnx, encoding, msg)=
+	_cmdFinalizeResult(cnx, decode(encoding, msgFilter(cnx, msg)));;
+
+fun cmdRandomBytes(cnx, byteCount) =
+	let intFromDec(byteCount) -> nb in
+	_cmdFinalizeResult(cnx, strRand(nb));;

@@ -1,0 +1,27 @@
+
+const HOST_USER="foobar";;	// on linux-like system, the hsm will switch to this use account as soon as http and ssh server are started.
+
+const CONSOLE_ENABLED=true;;
+
+const HTTP_ENABLED=false;;
+const HTTP_TIMEOUT=30000;;
+// HTTPS server:
+//const HTTP_ADDR="0.0.0.0";;
+//const HTTP_PORT=8443;;
+//const TLS_SERVER_KEY="foobar.com.key.pem";;
+//const TLS_SERVER_KEY_PWD= "";;
+//const TLS_SERVER_CER="foobar.com.cer.pem";;
+//const TLS_LOGIN_CER="loginAuthority.cer.pem";;
+// HTTP server:
+const HTTP_ADDR="0.0.0.0";;
+const HTTP_PORT=8080;;
+const TLS_SERVER_KEY="";;
+const TLS_SERVER_KEY_PWD= "";;
+const TLS_SERVER_CER="";;
+const TLS_LOGIN_CER="";;
+
+const SSH_ENABLED=false;;
+const SSH_ADDR="0.0.0.0";;
+const SSH_PORT=1234;;
+const SSH_SERVER_KEY="ed25519_private.pem";;	//openssl genpkey -algorithm ed25519 -out ed25519_private.pem
+const SSH_SERVER_KEY_PWD="";;

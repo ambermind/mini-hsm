@@ -1,0 +1,507 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+struct KeyAccess=[
+	fDescribeA, fCreateA, fLoadExtA, fPublicA,
+	fEcdhA,
+	fPadA, fUnpadA,
+	fSignA, fVerifyA,
+	fEncryptA, fDecryptA
+];;
+
+struct HsmKey=[nameK, typeK, loginK, timeK, dataK, accessK, extK];;
+fun isPrivateKey(key)= keyIsPrivate(key.extK);;
+
+var Keys=hashmapCreate(10);; 
+
+const KEY_AES    ="AES";;
+const KEY_DES    ="DES";;
+const KEY_DES3   ="DES3";;
+const KEY_EC     ="EC";;
+const KEY_ED25519="ED25519";;
+const KEY_RSA    ="RSA";;
+const KEY_X25519 ="X25519";;
+
+const KeyTypes= 
+	[KEY_AES,    [fDescribeA=#keyDescribeAes, fCreateA=#keyCreateAes, fLoadExtA=#keyLoadExtAes, fPadA=#keyPadAes,  fUnpadA=#keyUnpadAes, fEncryptA=#keyEncryptAes, fDecryptA=#keyDecryptAes]]::
+	[KEY_DES,    [fDescribeA=#keyDescribeDes, fCreateA=#keyCreateDes, fLoadExtA=#keyLoadExtDes, fPadA=#keyPadDes,  fUnpadA=#keyUnpadDes, fEncryptA=#keyEncryptDes, fDecryptA=#keyDecryptDes]]::
+	[KEY_DES3,   [fDescribeA=#keyDescribeDes3, fCreateA=#keyCreateDes3, fLoadExtA=#keyLoadExtDes3, fPadA=#keyPadDes3,  fUnpadA=#keyUnpadDes3, fEncryptA=#keyEncryptDes3, fDecryptA=#keyDecryptDes3]]::
+	[KEY_EC,     [fDescribeA=#keyDescribeEc, fCreateA=#keyCreateEc, fLoadExtA=#keyLoadExtEc, fPublicA=#keyPublicEc, fSignA=#keySignEc, fVerifyA=#keyVerifyEc, fEcdhA=#keyEcdhEc]]::
+	[KEY_ED25519,[fDescribeA=#keyDescribeEd25519, fCreateA=#keyCreateEd25519, fLoadExtA=#keyLoadExtEd25519, fPublicA=#keyPublicEd25519, fSignA=#keySignEd25519, fVerifyA=#keyVerifyEd25519]]::
+	[KEY_RSA,    [fDescribeA=#keyDescribeRsa, fCreateA=#keyCreateRsa, fLoadExtA=#keyLoadExtRsa, fPublicA=#keyPublicRsa, fSignA=#keySignRsa, fVerifyA=#keyVerifyRsa, fEncryptA=#keyEncryptRsa, fDecryptA=#keyDecryptRsa]]::
+	[KEY_X25519, [fDescribeA=#keyDescribeX25519, fCreateA=#keyCreateX25519, fLoadExtA=#keyLoadExtX25519, fPublicA=#keyPublicX25519, fEcdhA=#keyEcdhX25519]]::
+	nil;;
+const KeyTypesHashmap = hashmapInit(6, KeyTypes);;
+fun accessFromKeyType(type) = abortWhenNil(hashmapGet(KeyTypesHashmap, type), "NOK: unknown key type");;
+
+enum ED25519, ED25519PH;;
+const SignatureAlgos =
+	["ECDSA_SECP256R1_SHA256",ECDSA_SECP256R1_SHA256]::
+	["ECDSA_SECP384R1_SHA384",ECDSA_SECP384R1_SHA384]::
+	["ED25519",               ED25519]::
+	["ED25519PH",             ED25519PH]::
+	["RSA_PKCS1_SHA1",        RSA_PKCS1_SHA1]::
+	["RSA_PKCS1_SHA256",      RSA_PKCS1_SHA256]::
+	["RSA_PKCS1_SHA384",      RSA_PKCS1_SHA384]::
+	["RSA_PKCS1_SHA512",      RSA_PKCS1_SHA512]::
+	["RSA_PSS_RSAE_SHA256",  RSA_PSS_RSAE_SHA256]::
+	["RSA_PSS_RSAE_SHA384",  RSA_PSS_RSAE_SHA384]::
+	["RSA_PSS_RSAE_SHA512",  RSA_PSS_RSAE_SHA512]::
+	nil;;
+const SignatureAlgosHashmap = hashmapInit(6, SignatureAlgos);;
+fun algoFromStr(algo) = abortWhenNil(hashmapGet(SignatureAlgosHashmap, algo), "NOK: unknown signature");;
+
+const Curves =
+	["curve25519",ecCurve25519()]::
+	["secp256k1", ecSecp256k1()]::
+	["secp256r1", ecSecp256r1()]::
+	["secp384r1", ecSecp384r1()]::
+	["secp521r1", ecSecp521r1()]::
+	nil;;
+const CurvesHashmap = hashmapInit(6, Curves);;
+fun curveFromStr(curve) = abortWhenNil(hashmapGet(CurvesHashmap, curve), "NOK: unknown curve");;
+
+enum SCHEME_CBC, SCHEME_CMAC, SCHEME_ECB, SCHEME_PKCS1, SCHEME_OAEP;;
+const Schemes =
+	["CBC",  SCHEME_CBC]::
+	["CMAC", SCHEME_CMAC]::
+	["ECB",  SCHEME_ECB]::
+	["OAEP", SCHEME_OAEP]::
+	["PKCS1",SCHEME_PKCS1]::
+	nil;;
+const SchemesHashmap = hashmapInit(6, Schemes);;
+fun schemeFromStr(scheme) = abortWhenNil(hashmapGet(SchemesHashmap, scheme), "NOK: unknown scheme");;
+
+const Paddings =
+	["ANSI_X9_23",[#paddingANSI_X9_23, #unPaddingANSI_X9_23]]::
+	["ISO_10126", [#paddingISO_10126, #unPaddingISO_10126]]::
+	["ISO_7816_4",[#paddingISO_7816_4, #unPaddingISO_7816_4]]::
+	["PKCS_5",    [#paddingPKCS_5, #unPaddingPKCS_5]]::
+	["TLS",       [#paddingTLS, #unPaddingTLS]]::
+	nil;;
+const PaddingHashmap = hashmapInit(4, Paddings);;
+fun padFromStr(padding) = let hashmapGet(PaddingHashmap, padding) ->[fPad, _] in abortWhenNil(fPad, "NOK: unknown padding");;
+fun unpadFromStr(padding) = let hashmapGet(PaddingHashmap, padding) ->[_, fUnpad] in abortWhenNil(fUnpad, "NOK: unknown padding");;
+
+fun default(val, def)= if val==nil then def else val;;
+
+fun _checkIv(blockLen, iv)=
+	if iv==nil then strCreate(blockLen, 0)
+	else if strLength(iv)==blockLen then iv
+	else abortWithMsg(strFormat("NOK: wrong iv size (should be *)", blockLen));;
+
+//-------------- padding
+fun msgPad(msg, blockLen, padding) =
+	let padFromStr(default(padding, "PKCS_5")) -> fPad in
+	strConcat(msg, call fPad(msg, blockLen));;
+
+fun msgUnpad(msg, padding) =
+	let unpadFromStr(default(padding, "PKCS_5")) -> fUnpad in
+	strLeft(msg, call fUnpad(msg));;
+
+fun msgCheckPadding(msg, blockLen) =
+	if (strLength(msg)%blockLen)<>0 then abortWithMsg(strFormat("NOK: wrong padding (block length is *)", blockLen))
+	else msg;;
+
+//-------------- specific by key type
+//----- AES
+fun keyDescribeAes(ext)= strFormat("AES *", 8*strLength(aesFromKey(ext)));;
+
+fun keyPadAes(ext, msg, padding)= msgPad(msg, AES_BLOCK, padding);;
+fun keyUnpadAes(ext, msg, padding)= msgUnpad(msg, padding);;
+
+fun keyEncryptAes(ext, msg, scheme, context)=
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> aesEncryptEcb(aesFromKey(ext), msgCheckPadding(msg, AES_BLOCK)),
+		SCHEME_CBC -> aesEncryptCbc(aesFromKey(ext), _checkIv(AES_BLOCK, context), msgCheckPadding(msg, AES_BLOCK)),	// context is IV
+		SCHEME_CMAC-> aesCmac(aesFromKey(ext), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyDecryptAes(ext, msg, scheme, context)=
+	msgCheckPadding(msg, AES_BLOCK);
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> aesDecryptEcb(aesFromKey(ext), msg),
+		SCHEME_CBC -> aesDecryptCbc(aesFromKey(ext), _checkIv(AES_BLOCK, context), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyLoadExtAes(data)= aesKey data;;
+fun keyCreateAes(option) =
+	let default(intFromDec(option), 256) -> size in
+	if size==128 || size==192 || size==256 then	strRand(size/8)
+	else abortWithMsg("NOK: wrong key size");;
+
+//----- DES
+fun keyDescribeDes(ext)= "DES";;
+
+fun keyPadDes(ext, msg, padding)= msgPad(msg, DES_BLOCK, padding);;
+fun keyUnpadDes(ext, msg, padding)= msgUnpad(msg, padding);;
+
+fun keyEncryptDes(ext, msg, scheme, context)=
+	msgCheckPadding(msg, DES_BLOCK);
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> desEncryptEcb(desFromKey(ext), msg),
+		SCHEME_CBC -> desEncryptCbc(desFromKey(ext), _checkIv(DES_BLOCK, context), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyDecryptDes(ext, msg, scheme, context)=
+	msgCheckPadding(msg, DES_BLOCK);
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> desDecryptEcb(desFromKey(ext), msg),
+		SCHEME_CBC -> desDecryptCbc(desFromKey(ext), _checkIv(DES_BLOCK, context), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyLoadExtDes(data)= desKey data;;
+fun keyCreateDes(option) = desCreateKey();;
+
+//----- DES3
+fun keyDescribeDes3(ext)= "DES3";;
+
+fun keyPadDes3(ext, msg, padding)= msgPad(msg, DES_BLOCK, padding);;
+fun keyUnpadDes3(ext, msg, padding)= msgUnpad(msg, padding);;
+
+fun keyEncryptDes3(ext, msg, scheme, context)=
+	msgCheckPadding(msg, DES_BLOCK);
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> des3EncryptEcb(des3FromKey(ext), msg),
+		SCHEME_CBC -> des3EncryptCbc(des3FromKey(ext), _checkIv(DES_BLOCK, context), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyDecryptDes3(ext, msg, scheme, context)=
+	msgCheckPadding(msg, DES_BLOCK);
+	match schemeFromStr(default(scheme, "ECB")) with
+		SCHEME_ECB -> des3DecryptEcb(des3FromKey(ext), msg),
+		SCHEME_CBC -> des3DecryptCbc(des3FromKey(ext), _checkIv(DES_BLOCK, context), msg),	// context is IV
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyLoadExtDes3(data)= des3Key data;;
+fun keyCreateDes3(option) = des3CreateKey();;
+
+//----- ED25519
+fun keyDescribeEd25519(ext)= if keyIsPrivate(ext) then "ED25519 PRIVATE" else "ED25519 PUBLIC";;
+fun keyPublicEd25519(ext) = derFromPublicKey(ext);;
+
+fun keySignEd25519(ext, msg, algo, context) = 
+	match algoFromStr(default(algo, "ED25519")) with
+		ED25519   -> ed25519Sign(ed25519FromKey(ext), msg),
+		ED25519PH -> ed25519phSign(ed25519FromKey(ext), msg, context),
+		_ -> abortWithMsg("NOK: incompatible algorithm");;
+
+fun keyVerifyEd25519(ext, msg, signature, algo, context) = 
+	match algoFromStr(default(algo, "ED25519")) with
+		ED25519   -> ed25519Verify(ed25519FromKey(ext), msg, signature),
+		ED25519PH -> ed25519phVerify(ed25519FromKey(ext), msg, context, signature),
+		_ -> abortWithMsg("NOK: incompatible algorithm");;
+
+fun keyLoadExtEd25519(data)= keyFromDER(data, nil);;
+fun keyCreateEd25519(option) = derFromPrivateKey(ed25519Key ed25519Create());;
+
+//----- X25519
+fun keyDescribeX25519(ext)= if keyIsPrivate(ext) then "X25519 PRIVATE" else "X25519 PUBLIC";;
+fun keyPublicX25519(ext) = derFromPublicKey(ext);;
+fun keyEcdhX25519(ext, publicKey)=
+	x25519Ecdh(x25519FromKey(ext), x25519KeyPub(x25519FromKey(keyFromDER(publicKey, nil))));;
+
+fun keyLoadExtX25519(data)= keyFromDER(data, nil);;
+fun keyCreateX25519(option) = derFromPrivateKey(x25519Key x25519KeyPair(nil));;
+
+//------ EC
+fun keyDescribeEc(ext)=
+	strFormat("EC * *",
+		strUppercase(ecKeyCurveName(ecFromKey(ext))),
+		if keyIsPrivate(ext) then "PRIVATE" else "PUBLIC");;
+fun keyPublicEc(ext) = derFromPublicKey(ext);;
+fun keyEcdhEc(ext, publicKey)=
+	ecEcdhStr(ecFromKey(ext), ecKeyPubStr(ecFromKey(keyFromDER(publicKey, nil))));;
+
+fun keySignEc(ext, msg, algo, context) =
+	let algoFromStr(default(algo, "ECDSA_SECP256R1_SHA256")) -> algo in
+	signatureGenerate(algo, ext, msg);;
+fun keyVerifyEc(ext, msg, signature, algo, context) =
+	let algoFromStr(default(algo, "ECDSA_SECP256R1_SHA256")) -> algo in
+	signatureCheck(algo, ext, msg, signature);;
+
+fun keyLoadExtEc(data)= keyFromDER(data, nil);;
+fun keyCreateEc(curve)=
+	let curveFromStr(default(curve, "secp256r1")) -> curve in
+	derFromPrivateKey(ecKey ecCreate(curve));;
+
+//------ RSA
+fun keyDescribeRsa(ext)=
+	strFormat("RSA * *", 
+		bigNbits(rsaModulus(rsaFromKey(ext))),
+		if keyIsPrivate(ext) then "PRIVATE" else "PUBLIC");;
+fun keyPublicRsa(ext) = derFromPublicKey(ext);;
+
+fun keySignRsa(ext, msg, algo, context) =
+	let algoFromStr(default(algo, "RSA_PKCS1_SHA256")) -> algo in
+	signatureGenerate(algo, ext, msg);;
+
+fun keyVerifyRsa(ext, msg, signature, algo, context) =
+	let algoFromStr(default(algo, "RSA_PKCS1_SHA256")) -> algo in
+	signatureCheck(algo, ext, msg, signature);;
+
+fun keyEncryptRsa(ext, msg, scheme, context)=
+	match schemeFromStr(default(scheme, "PKCS1")) with
+		SCHEME_PKCS1-> pkcs1EncryptPrivRsa(rsaFromKey(ext), msg),
+		SCHEME_OAEP -> oaepEncryptPrivRsa(rsaFromKey(ext), msg),
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyDecryptRsa(ext, msg, scheme, context)=
+	match schemeFromStr(default(scheme, "PKCS1")) with
+		SCHEME_PKCS1-> pkcs1DecryptPubRsa(rsaFromKey(ext), msg),
+		SCHEME_OAEP -> oaepDecryptPubRsa(rsaFromKey(ext), msg),
+		_ -> abortWithMsg("NOK: incompatible scheme");;
+
+fun keyLoadExtRsa(data)= keyFromDER(data, nil);;
+fun keyCreateRsa(option)=
+	let intFromDec(option) -> size in
+	let if size>0 then size else 1024 -> size in
+	derFromPrivateKey(rsaKey rsaCreate(size, nil));;
+
+//-------------- key management
+fun rightKey(keyName, suffix)= strFormat(RIGHTS_KEYS_FORMAT, keyName, suffix);;
+
+fun keyPath(keyName) = strConcat(PATH_KEYS, keyName);;
+
+fun keyNameCheck(keyName) =
+	if strLength(keyName)>KEY_MAX_LENGTH then abortWithMsg("NOK: key name is too long")
+	else if regexpTest(keyName, REGEXP_KEY, 0)==nil then abortWithMsg("NOK: key name is malformed")
+	else true;;
+
+fun passwordCheck(password) =
+	if strLength(password)<PASSWORD_MIN_LENGTH then abortWithMsg("NOK: password is too short")
+	else true;;
+
+fun keyLoad(expectedName, content) =
+	let strLines(content) -> lines in
+	if lines<>nil then
+	let hashmapInit(3, listMap(lines, lambda(line) = 
+		let strSplit(" ", line) -> key::value::_ in 
+		if (!strEmpty(key)) && (!strEmpty(value)) then
+		[key, value]
+	)) -> h in
+	let hashmapGet(h, KEY_FIELD_NAME) -> keyName in
+	if keyName==expectedName then
+	let hashmapGet(h, KEY_FIELD_TYPE) -> type in
+	let hashmapGet(h, KEY_FIELD_LOGIN) -> login in
+	let timeFromYyddmmhhmmssz(hashmapGet(h, KEY_FIELD_TIME)) -> t in
+	let hashmapGet(h, KEY_FIELD_DATA) -> data in
+	let accessFromKeyType(type) ->keyAccess in
+	if keyAccess<>nil then
+	let call keyAccess.fLoadExtA(hsmKeyDecrypt(strFromHex(data))) -> ext in
+	if ext<>nil then
+	let [nameK=keyName, typeK=type, loginK=login, timeK=t, dataK=data, accessK=keyAccess, extK=ext] -> key in (
+		hashmapSet(Keys, key.nameK, key);
+		true
+	);;
+
+fun keyLoadAll ()=
+	for path in fileList(PATH_KEYS) do
+		let strTail(path, strLength(PATH_KEYS)) -> expectedName in (
+			echoLn strFormat("- *", expectedName);
+			try keyLoad(expectedName, load(path))	// keyLoad may throw 'abort' in 'accessFromKeyType' -> try is needed
+		);;
+
+fun keyCreateAndSave(type, login, keyName, data)=
+	let
+		(KEY_FIELD_NAME::keyName::nil)::
+		(KEY_FIELD_TYPE::type::nil)::
+		(KEY_FIELD_LOGIN::login::nil)::
+		(KEY_FIELD_TIME::yyddmmhhmmsszFromTime(time())::nil)::
+		(KEY_FIELD_DATA::hexFromStr(hsmKeyEncrypt(data))::nil)::
+		nil
+	-> keyValueList in
+	let strJoin("\n", listMap(keyValueList, lambda(line) = strJoin(" ", line))) -> content in
+	if keyLoad(keyName, content) then (
+		save(content, keyPath(keyName));
+		true
+	);;
+
+fun keyDelete(keyName)=
+	fileDelete(keyPath(keyName));
+	hashmapSet(Keys, keyName, nil);;
+
+fun _keyAccessCheck(f) = if f<>nil then f else abortWithMsg("NOK: function not available for this type of key");;
+
+fun keyDescrition(key)=
+	let call _keyAccessCheck(key.accessK.fDescribeA)(key.extK) -> description in
+	strFormat("- *: *; *; *", key.nameK, fullDate(key.timeK), key.loginK, description);;
+
+fun keyPublic(key)= call _keyAccessCheck(key.accessK.fPublicA)(key.extK);;
+fun keyEcdh(key, publicKey)= if isPrivateKey(key) then call _keyAccessCheck(key.accessK.fEcdhA)(key.extK, publicKey);;
+
+fun keySign(key, msg, algo, context)= if isPrivateKey(key) then call _keyAccessCheck(key.accessK.fSignA)(key.extK, msg, algo, context);;
+fun keyVerify(key, msg, signature, algo, context)= call _keyAccessCheck(key.accessK.fVerifyA)(key.extK, msg, signature, algo, context);;
+
+fun keyPad(key, msg, padding)= call _keyAccessCheck(key.accessK.fPadA)(key.extK, msg, padding);;
+fun keyUnpad(key, msg, padding)= call _keyAccessCheck(key.accessK.fUnpadA)(key.extK, msg, padding);;
+
+fun keyEncrypt(key, msg, scheme, context) = if isPrivateKey(key) then call _keyAccessCheck(key.accessK.fEncryptA)(key.extK, msg, scheme, context);;
+fun keyDecrypt(key, msg, scheme, context) = call _keyAccessCheck(key.accessK.fDecryptA)(key.extK, msg, scheme, context);;
+
+fun keyCsr(key, subject)=	// subject is expected to start with the separator char: /CN=foo/C=bar
+	if !isPrivateKey(key) then abortWithMsg("NOK: key must be private in order to sign the CSR")
+	else
+	let _keyAccessCheck(key.accessK.fSignA) -> _ in	// only to check the key can sign
+	csrPEM(csrCreate(key.extK, subjectListFromString(subject)));;
+
+fun keyCreate(login, keyName, type, option)=
+	let accessFromKeyType(type) ->keyAccess in
+	let call _keyAccessCheck(keyAccess.fCreateA)(option) -> data in
+	masterSync(lambda ()=
+		if nil<>hashmapGet(Keys, keyName) then abortWithMsg("NOK: key already exists")
+		else keyCreateAndSave(type, login, keyName, data)
+	);;
+
+fun _keyImport(cnx, keyName, login, key)=
+	if key==nil then abortWithMsg("NOK: could not load key")
+	else
+	let if keyIsPrivate(key) then derFromPrivateKey(key) else derFromPublicKey(key) -> der in
+	match key with
+		ecKey ec     -> keyCreateAndSave(KEY_EC, login, keyName, der),
+		rsaKey rsa   -> keyCreateAndSave(KEY_RSA, login, keyName, der),
+		ed25519Key ed-> keyCreateAndSave(KEY_ED25519, login, keyName, der),
+		x25519Key x  -> keyCreateAndSave(KEY_X25519, login, keyName, der),
+		aesKey aes   -> keyCreateAndSave(KEY_AES, login, keyName, aes),
+		desKey des   -> keyCreateAndSave(KEY_DES, login, keyName, des),
+		des3Key des3 -> keyCreateAndSave(KEY_DES3, login, keyName, des3),
+		_ -> abortWithMsg("NOK: unsupported key type");;
+
+fun keyImport(cnx, keyName, login, input, pwd) =
+	_keyImport(cnx, keyName, login,
+		if nil<>strPos(input, "-----BEGIN", 0) then keyFromPEM(input, pwd)
+		else keyFromDER(input, pwd));;
+
+fun keyImportSSH(cnx, keyName, login, input)=
+	_keyImport(cnx, keyName, login, keyFromPublicSSH(input));;
+
+fun keyExport(key, password) =
+	if !isPrivateKey(key) then pemFromPublicKey(key.extK)
+	else
+	if passwordCheck(password) then
+	pemFromPrivateKey(key.extK, password);;
+
+fun keyExportPublic(key) = pemFromPublicKey(key.extK);;
+
+//-------------- commands
+fun cmdKeyTypes(cnx)=
+	for [type, _] in KeyTypes do cnxEchoLn(cnx, strFormat("- *", type));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdSignatures(cnx)=
+	for [algo, _] in SignatureAlgos do cnxEchoLn(cnx, strFormat("- *", algo));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdCurves(cnx)=
+	for [curve, _] in Curves do cnxEchoLn(cnx, strFormat("- *", curve));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdPaddings(cnx)=
+	for [padding, _] in Paddings do cnxEchoLn(cnx, strFormat("- *", padding));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdSchemes(cnx)=
+	for [scheme, _] in Schemes do cnxEchoLn(cnx, strFormat("- *", scheme));
+	cnxEchoLn(cnx, "OK");;
+
+fun _checkAddKey(cnx, keyName)=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_KEYS_CREATE) then abortWithMsg("NOK: Permission denied")
+	else
+	if !keyNameCheck(keyName) then abortWithMsg("NOK: Wrong key name syntax")
+	else
+	if nil<>hashmapGet(Keys, keyName) then abortWithMsg("NOK: key already exists")
+	else
+	true;;
+
+fun cmdCreateKey(cnx, keyName, type, option)=
+	if _checkAddKey(cnx, keyName) then
+	let keyCreate(cnx.userC.loginU, keyName, type, option) -> result in
+	cnxEchoLn(cnx, if result then "OK" else "NOK");;
+
+fun cmdKeyImport(cnx, keyName, input, pwd)= masterSync(lambda ()=
+	if _checkAddKey(cnx, keyName) then
+	let keyImport(cnx, keyName, cnx.userC.loginU, msgFilter(cnx, input), pwd) -> result in
+	cnxEchoLn(cnx, if result then "OK" else "NOK"));;
+
+fun cmdKeyImportSSH(cnx, keyName, input)= masterSync(lambda ()=
+	if _checkAddKey(cnx, keyName) then
+	let keyImportSSH(cnx, keyName, cnx.userC.loginU, msgFilter(cnx, input)) -> result in
+	cnxEchoLn(cnx, if result then "OK" else "NOK"));;
+
+
+fun cmdDelKey(cnx, keyName)= masterSync(lambda ()=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_KEYS_DELETE) then abortWithMsg("NOK: Permission denied")
+	else
+	if nil==hashmapGet(Keys, keyName) then abortWithMsg("NOK: key not found")
+	else (
+		keyDelete(keyName);
+		cnxEchoLn(cnx, "OK")
+	));;
+
+fun _cmdKey(cnx, keyName, rightSuffix) =
+	if	(!userCheckRights(cnx.userC, RIGHTS_ADMIN_KEYS))&&
+		(!userCheckRights(cnx.userC, rightKey(keyName, rightSuffix))) then abortWithMsg("NOK: Permission denied")
+	else
+	let hashmapGet(Keys, keyName) -> key in
+	if key==nil then abortWithMsg("NOK: key not found")
+	else key;;
+
+fun cmdPublicKey(cnx, keyName)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PUBLIC_READ) -> key in
+	_cmdFinalizeResult(cnx, keyPublic(key));;
+
+fun cmdEcdh(cnx, keyName, publicKey)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PRIVATE_ECDH) -> key in
+	_cmdFinalizeResult(cnx, keyEcdh(key, msgFilter(cnx, publicKey)));;
+
+fun cmdSign(cnx, keyName, msg, algo, context)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PRIVATE_SIGN) -> key in
+	_cmdFinalizeResult(cnx, keySign(key, msgFilter(cnx, msg), algo, context));;
+
+fun cmdVerify(cnx, keyName, msg, signature, algo, context)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PUBLIC_VERIFY) -> key in
+	let keyVerify(key, msgFilter(cnx, msg), msgFilter(cnx, signature), algo, context) -> verified in
+	_cmdFinalizeAsciiResult(cnx, if verified then "YES" else "NO");;
+
+fun cmdPad(cnx, keyName, msg, padding)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_DESCRIBE) -> key in
+	_cmdFinalizeResult(cnx, keyPad(key, msgFilter(cnx, msg), padding));;
+
+fun cmdUnpad(cnx, keyName, msg, padding)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_DESCRIBE) -> key in
+	_cmdFinalizeResult(cnx, keyUnpad(key, msgFilter(cnx, msg), padding));;
+
+fun cmdEncrypt(cnx, keyName, msg, scheme, context)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PRIVATE_ENCRYPT) -> key in
+	_cmdFinalizeResult(cnx, keyEncrypt(key, msgFilter(cnx, msg), scheme, msgFilter(cnx, context)));;
+
+fun cmdDecrypt(cnx, keyName, msg, scheme, context)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PUBLIC_DECRYPT) -> key in
+	_cmdFinalizeResult(cnx, keyDecrypt(key, msgFilter(cnx, msg), scheme, msgFilter(cnx, context)));;
+
+fun cmdCsr(cnx, keyName, subject)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_PRIVATE_SIGN) -> key in
+	_cmdFinalizeAsciiResult(cnx, keyCsr(key, msgFilter(cnx, subject)));;
+
+fun cmdDescribe(cnx, keyName)=
+	let _cmdKey(cnx, keyName, RIGHTS_SUFFIX_KEY_DESCRIBE) -> key in (
+		cnxEchoLn(cnx, keyDescrition(key));
+		cnxEchoLn(cnx, "OK")
+	);;
+
+fun cmdKeys(cnx)=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_KEYS) then abortWithMsg("NOK: Permission denied")
+	else
+	let quicksort(listFromHashmap(Keys), lambda([a, _], [b, _])= 0>strCmp(a, b)) -> keyList in (
+		for [_, key] in keyList do cnxEchoLn(cnx, keyDescrition(key));
+		cnxEchoLn(cnx, "OK")
+	);;
+
+fun cmdKeyExport(cnx, keyName, password)=
+	let _cmdKey(cnx, keyName, RIGHTS_ADMIN_KEYS_PRIVATE_EXPORT) -> key in
+	_cmdFinalizeAsciiResult(cnx, keyExport(key, msgFilter(cnx, password)));;
+
+fun cmdKeyExportPublic(cnx, keyName)=
+	let _cmdKey(cnx, keyName, RIGHTS_ADMIN_KEYS_PUBLIC_EXPORT) -> key in
+	_cmdFinalizeAsciiResult(cnx, keyExportPublic(key));;

@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+//http://127.0.0.1:8080/?batch=silent%0Alogon+admin+admin%0Akeys%0Asha256+"Foobar"%0A*%0Aprint+%22-%22%0A*
+//http://127.0.0.1:8080/?batch=silent%0Alogon+admin+admin%0Adate%0A*
+//http://127.0.0.1:8080/?batch=logon+admin+admin%0Akeys%0Asha256+"Foobar"%0A*%0Aprint+%22-%22%0A*
+//http://127.0.0.1:8080/?batch=logon+admin+admin%0Akeys%0Ausers+;+keys
+
+
+const SERVER_CERTIFICATE_RELOAD_PERIOD= 3600*24;;
+var HttpSrv;;
+
+fun httpLoadHostList ()=
+	if !strEmpty(TLS_SERVER_KEY) then
+	[load(TLS_SERVER_KEY), TLS_SERVER_KEY_PWD, load(TLS_SERVER_CER)::nil, load(TLS_LOGIN_CER)]::nil;;
+
+fun httpCertificateReload ()=
+	onTimeout(SERVER_CERTIFICATE_RELOAD_PERIOD*1000, (lambda ()=
+		let httpLoadHostList() -> hostList in
+		if hostList<>nil then httpSrvUpdateHostList(HttpSrv, hostList);
+		httpCertificateReload();
+	));;
+
+fun httpStart()=
+	set HttpSrv=httpSrvStartEx(httpLoadHostList(), HTTP_ADDR, HTTP_PORT, (lambda(h)=
+		httpSrvOnRequest(h, (lambda(verb, uri)=
+			httpSrvSetHeader(h, HTTP_CONTENT_TYPE, "text/plain");
+			let httpSrvParseArgs(h) -> [args, files] in
+			let hashmapGet(args, "batch") -> batch in
+			let fifoCreate() -> fifo in
+			let cnxSetEcho(true, cnxCreate((lambda(output) = fifoIn(fifo, output); output))) -> cnx in 
+			(
+				let httpSrvGetClientCertificateLogin(h) -> login in
+					if login<>nil then
+					let userLogonWithTLS(login) -> u in
+					if u<>nil then set cnx.userC=u;
+				cnxHandleInput(cnx, true, batch);
+				strBuild(fifoList(fifo))
+			)
+		));
+		true
+	));
+	if HttpSrv==nil then void echoLn strFormat("> Http server could not be started on *:*", HTTP_ADDR, HTTP_PORT)
+	else (
+		echoLn strFormat("> Http server started on *:*", HTTP_ADDR, HTTP_PORT);
+		httpSrvSetDefaultTimeout(HttpSrv, HTTP_TIMEOUT);
+		httpCertificateReload();
+		true
+	);;

@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+use core.util.regexp;;
+use core.crypto.oid;;
+use core.crypto.hash;;
+use core.crypto.x25519;;
+use core.crypto.ed25519;; 
+use core.crypto.rsa;; 
+use core.crypto.key;; 
+use core.crypto.aes;;
+use core.crypto.des;;
+use core.crypto.block;;
+use core.crypto.sign;;
+use core.crypto.ec;;
+use core.crypto.pkcs1;;
+use core.crypto.oaep;;
+use core.crypto.asn1;;
+use core.crypto.cer;;
+use core.crypto.cer.maker;;
+
+use core.util.base64;;
+
+use core.net.http;;
+use core.net.http.srv;;
+use core.net.ssh;;
+use core.net.ssh.shell.srv;;
+
+use hsm.config;;
+
+const _DEBUG=true;;
+const PATH_MASTER_KEY="MasterKey";;
+
+const PATH_KEYS="keys/";;
+const PATH_USERS="users/";;
+
+const USER_FIELD_AUTH_MODE="authMode";;
+const USER_FIELD_AUTH_DATA="authData";;
+const USER_FIELD_RIGHTS="rights";;
+
+const RIGHTS_ADMIN_USERS_INFO="/admin/users/info";;
+const RIGHTS_ADMIN_USERS_ADD="/admin/users/create";;
+const RIGHTS_ADMIN_USERS_UPDATE="/admin/users/update";;
+const RIGHTS_ADMIN_USERS_DELETE="/admin/users/delete";;
+const RIGHTS_ADMIN_KEYS="/admin/keys/";;
+const RIGHTS_ADMIN_KEYS_CREATE="/admin/keys/create";;
+const RIGHTS_ADMIN_KEYS_DELETE="/admin/keys/delete";;
+const RIGHTS_ADMIN_KEYS_PRIVATE_EXPORT="/admin/keys/private/export";;
+const RIGHTS_ADMIN_KEYS_PUBLIC_EXPORT="/admin/keys/public/export";;
+
+const RIGHTS_KEYS_FORMAT="/keys/*/*";;
+const RIGHTS_SUFFIX_KEY_DESCRIBE="use/describe";;
+const RIGHTS_SUFFIX_KEY_PUBLIC_READ="use/public/read";;
+const RIGHTS_SUFFIX_KEY_PRIVATE_ECDH="use/private/ecdh";;
+const RIGHTS_SUFFIX_KEY_PRIVATE_SIGN="use/private/sign";;
+const RIGHTS_SUFFIX_KEY_PUBLIC_VERIFY="use/public/verify";;
+const RIGHTS_SUFFIX_KEY_PRIVATE_ENCRYPT="use/private/encrypt";;
+const RIGHTS_SUFFIX_KEY_PUBLIC_DECRYPT="use/public/decrypt";;
+
+const AUTH_MODE_NONE="none";;
+const AUTH_MODE_PASSWORD="password";;
+const AUTH_MODE_TLS="tls";;
+const AUTH_MODE_SSH="ssh";;
+
+const ADMIN_LOGIN="admin";;
+const ADMIN_PASSWORD="admin";;
+
+const LOGIN_MAX_LENGTH=64;;
+const KEY_MAX_LENGTH=64;;
+const PASSWORD_MIN_LENGTH=8;;
+const RIGHTS_MAX_LENGTH=2048;;
+const BUFFER_MAX_LENGTH=1024*2;;
+
+
+const REGEXP_LOGIN=regexpCreate("^[\\w_-\\.]+$");;
+const REGEXP_KEY=regexpCreate("^[\\w_-\\.]+$");;
+
+const KEY_FIELD_NAME="name";;
+const KEY_FIELD_TYPE="type";;
+const KEY_FIELD_LOGIN="login";;
+const KEY_FIELD_TIME="time";;
+const KEY_FIELD_DATA="data";;
+
+const HELP_TEXT="\nMiniHSM - 2025 - Sylvain Huet\nType 'man' to access manual";;
+
+struct User=[loginU, authModeU, authDataU, rightsU];;
+struct Cnx=[userC, fReplyC, inputC, lastResultC, bufferC, bufferStopPatternC, silentC, interactiveC, echoC];;
+
+include hsm._users;;
+include hsm._keys;;
+include hsm._encode;;
+include hsm._hash;;
+include hsm._cnx;;
+include hsm._man;;
+include hsm._commands;;
+include hsm._http;;
+include hsm._ssh;;
+
+const MasterLock= lockCreate();;
+fun masterSync(f) = lockSync(MasterLock, f);;
+
+//------- MASTER KEY : all secrets are encrypted with this key
+var HsmAesKey;;
+var HsmAesIV;;
+
+fun hsmKeyEncrypt(data)= aesEncryptCbc(HsmAesKey, HsmAesIV, msgPad(data, AES_BLOCK, "PKCS_5"));;
+fun hsmKeyDecrypt(data)= msgUnpad(aesDecryptCbc(HsmAesKey, HsmAesIV, data), "PKCS_5");;
+
+fun hsmKeyInit ()=
+	let load(PATH_MASTER_KEY) -> hsmKey in (
+		if strLength(hsmKey)<>(32+16) then // AES256 + 128iv
+			save(set hsmKey=strRand(32+16), PATH_MASTER_KEY);
+		set HsmAesKey=strLeft(hsmKey, 32);
+		set HsmAesIV=strRight(hsmKey, 16);
+	);;
+
+
+//-------------- TEST
+fun hsmTest(batch)=
+	for path in fileList(PATH_KEYS) do save(nil, path);
+	set Keys=hashmapCreate(10);
+	let cnxSetEcho(true, cnxCreate(#echo)) -> cnx in 
+	for line in strLines(batch) do
+		if line=="end" then break nil
+		else 
+			cnxHandleInput(cnx, true, line)
+		;;
+		
+//-------------- CONSOLE
+fun hsmConsoleLoop(cnx)=
+	onPrompt(cnxPromptString(cnx), (lambda(input)=
+		cnxHandleInput(cnx, true, input);
+		hsmConsoleLoop(cnx)
+	));;
+
+fun hsmStartConsole ()=
+	echoLn "> Start console";
+	let cnxCreate(#echo) -> cnx in (
+		cmdHelp(cnx);
+		cnxHandleInput(cnx, true, echoLn strFormat("logon * *", ADMIN_LOGIN, ADMIN_PASSWORD));
+		if cnx.userC<>nil then echoLn "> Please change the admin password!";
+		hsmConsoleLoop(cnx)
+	);;
+
+//-------------- STARTUP
+fun main()=
+	hsmKeyInit();	// get or generate the master key
+
+	if HTTP_ENABLED && !httpStart() then return nil;
+	if SSH_ENABLED && !sshStart() then return nil;
+	// on unix-like systems, we need root priviledge to start servers on ports under 1024
+	// once it's done, the following line switches to a less priviledged user, specified in hsm.config as HOST_USER
+	if !strEmpty(HOST_USER) then setHostUser(HOST_USER);
+
+	echoLn "> Check admin account";
+	if !userExists(ADMIN_LOGIN) then
+		userSave(userSetAuthModePassword(ADMIN_PASSWORD, userSetRights("/", [loginU=ADMIN_LOGIN])));
+
+	echoLn "> Load keys";
+	keyLoadAll();
+//	dump Keys;
+
+//	hsmTest (load "hsmTest.txt");	// watch out! this erases all keys
+	threadStart("console", lambda()=
+		void if CONSOLE_ENABLED then hsmStartConsole()
+		else consoleStart(nil)
+	);;

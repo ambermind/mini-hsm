@@ -1,0 +1,42 @@
+#ifdef MM2350Device
+use core.net.ipOverEth;;
+use baremetal.mm2350.boot;;
+use driver.generic.display;;
+
+const LOGO= strFromLzw(strFromHex(strBuild([
+"ffe0012058d0204181071502f8036ee1c1860f0dfe18289120458b043fe0cb0860230040100811801012c38078011e700406c310c996180c6450c90f00383887",
+"48e2248120c0a003364141294408c250121800183be00f002c68848841802a04020036039c668244880804ae5601e018f00f4022916420a01d76154200b38f44",
+"d28020f79fd2b7ff001912c90182a108811001b8aa3724210625230030840182807fc00e93043401c03078100cfc0196d141448b0c7e38b4c801a3451e1f2a4a",
+"f4f3d1e2bf1f362db6e6683120"
+])), nil);;
+
+const IP="169.254.1.1";;
+
+fun uiInit()=
+	uiStart(0, 0, 128, 64, nil, "MiniHSM");
+	drawBitmap(8, 0, LOGO, 112);
+	drawStringCenter(76, 22, "Less is more", false);
+	drawStringRight(128, 39, strFormat("* ETH ->",IP), false);
+	bitmapFillRectangle(uiBuffer(), 0, 55, nil, nil, 0xffffff, nil);
+	drawStringCenter(64, 56, "2025 - miniHSM - SH", true);
+	uiUpdate();;
+
+fun main ()= 
+	uiInit();
+	netStatic(netUp(ETH_RIGHT), IP, "255.255.0.0", nil, nil);
+	start("hsm");;
+
+#elifdef RPi4Device
+
+use core.net.ipOverEth;;
+
+fun main() = 
+	netStatic(netUp("eth0"), "169.254.1.1", "255.255.0.0", nil, nil);
+	start ("hsm");;
+
+#else
+
+fun main ()= 
+	start("hsm");;
+
+#endif

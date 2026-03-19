@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+// ssh -p 1234 admin@127.0.0.1
+// ssh -p 1234 admin@127.0.0.1 keys
+// ssh -p 1234 admin@127.0.0.1 < batch.txt
+
+//openssl genpkey -algorithm ed25519 -out ed25519_private.pem
+
+fun sshSendReply(h, val)=
+	let strReplace(val, "\10", "\13\10") -> val in
+	shellServerSendData(h, val);;
+
+fun sshHandleInput(h, cnx, input, flush) =
+	if input=="\4" || input=="\3" then void shellServerClose(h)
+	else
+	let strReplace(input, "\13", "\10") -> input in 
+		cnxHandleInput(cnx, flush, input)
+	;;
+
+fun sshWhenReady(h, cnx)=
+	shellServerOnEvent(h, (lambda(h, code, data)=
+//		echoLn strFormat "code *" code; hexDump data;
+		match code with 
+			SSH_READY-> void
+				if cnx.interactiveC then (
+					cmdHelp(cnx);
+					cnxEcho(cnx, cnxPromptString(cnx))
+				),
+			SSH_CHANNEL_EOF -> void (cnxFlushInput(cnx); sshTcpCloseAfter(h)),
+			SSH_SHELL_TERM -> void cnxSetEcho(false, cnxSetInteractive(true, cnx)),
+			SSH_SHELL_EXEC -> void sshHandleInput(h, cnx, data, true),
+			SSH_DATA -> void sshHandleInput(h, cnx, data, false),
+			_ -> if SSH_DEBUG then echoLn strFormat("\n> *: *", code, data)
+	));
+	true;;
+
+fun sshCheckAuth(h, authMode, login, authData)=
+	let cnxSetEcho(true, cnxCreate(lambda(val)= sshSendReply(h, val))) -> cnx in (
+		if authMode=="password" then cmdLogon(cnx, login, authData);
+		if authMode=="publicKey" then
+			let userLogonWithSSH(login, authData) -> u in
+			if u<>nil then set cnx.userC=u; 
+		if cnx.userC<>nil then sshWhenReady(h, cnx)
+	);;
+
+var SshServer;;
+
+fun sshStart()=
+	set SshServer = shellServerStart(load(SSH_SERVER_KEY), SSH_SERVER_KEY_PWD, SSH_ADDR, SSH_PORT,
+		#sshCheckAuth,
+		(lambda(h, code, data)=	// first event notification callback, replaced in sshWhenReady after authentication
+			if SSH_DEBUG then echoLn strFormat("\n> *: *", code, data)
+		));
+	if SshServer==nil then void echoLn strFormat("> SSH server could not be started on *:*", SSH_ADDR, SSH_PORT)
+	else (
+		echoLn strFormat("> SSH server started on *:*", SSH_ADDR, SSH_PORT);
+		true
+	);;

@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+//-------------- user management
+fun loginPath(login) = strConcat(PATH_USERS, login);;
+
+fun loginCheck(login) =
+	if strLength(login)>LOGIN_MAX_LENGTH then abortWithMsg("NOK: login is too long")
+	else if regexpTest(login, REGEXP_LOGIN, 0)==nil then abortWithMsg("NOK: login is malformed")
+	else true;;
+
+fun userMakePasswordHash(salt, password)= hexFromStr(sha256(strConcat(strFromHex(salt), password)));;
+fun userMakePasswordAuthData(salt, password)= strFormat("*:*", salt, userMakePasswordHash(salt, password));;
+fun userCheckPassword(u, password) =
+	if u.authModeU==AUTH_MODE_PASSWORD then	// this handles also u==nil
+	let strSplit(":", u.authDataU) -> salt::hash::_ in
+	hash==userMakePasswordHash(salt, password);;
+
+fun userCheckRights(u, requiredRight)=
+	nil<>listFind(u.rightsU, lambda(userRight)= (!strEmpty(userRight)) && strStartsWith(requiredRight, userRight));;
+
+fun userExists(login)= !strEmpty(load(loginPath(login)));;
+
+fun userLoad(login) =
+	let load(loginPath(login)) -> userData in
+	if strEmpty(userData) then abortWithMsg("NOK: unknown login")
+	else
+	let [loginU=login] -> u in (
+		for line in strLines(userData) do
+			let strSplit(" ", line) -> key::value::_ in
+			if !strEmpty(value) then match key with
+				USER_FIELD_AUTH_MODE -> set u.authModeU=value,
+				USER_FIELD_AUTH_DATA -> set u.authDataU=value,
+				USER_FIELD_RIGHTS -> void set u.rightsU=strSplit(":", value);
+		u
+	);;
+
+fun userSave(u)=
+	let
+		(USER_FIELD_AUTH_MODE::u.authModeU::nil)::
+		(USER_FIELD_AUTH_DATA::u.authDataU::nil)::
+		(USER_FIELD_RIGHTS::strJoin(":", u.rightsU)::nil)::
+		nil
+	-> keyValueList in
+	let strJoin("\n", listMap(keyValueList, lambda(line) = strJoin(" ", line))) -> data in (
+		save(data, loginPath(u.loginU));
+		u
+	);;
+
+fun userCreate(login) = userSave([loginU=login, authModeU=AUTH_MODE_NONE]);;
+
+fun userSetRights(rights, u)=
+	set u.rightsU=strSplit(":", rights);
+	u;;
+
+fun userSetAuthModePassword(password, u)=
+	set u.authModeU=AUTH_MODE_PASSWORD;
+	let hexFromStr(strRand(16)) -> salt in 
+	set u.authDataU= userMakePasswordAuthData(salt, password);
+	u;;
+
+fun userSetAuthModeTLS(u)=
+	set u.authModeU=AUTH_MODE_TLS;
+	set u.authDataU= nil;
+	u;;
+
+fun userSetAuthModeSSH(u, publicKey)=
+	set u.authModeU=AUTH_MODE_SSH;
+	set u.authDataU= publicKey;
+	u;;
+
+fun userLogonWithPassword(login, password)= masterSync(lambda ()=
+	let userLoad(login) -> u in
+	if userCheckPassword(u, password) then
+	u);;
+
+fun userLogonWithTLS(login)= masterSync(lambda ()=
+	let userLoad(login) -> u in
+	if u<>nil && u.authModeU==AUTH_MODE_TLS then
+	u);;
+
+fun userLogonWithSSH(login, publicKey) = masterSync(lambda ()=
+	let userLoad(login) -> u in
+	if u<>nil && u.authModeU==AUTH_MODE_SSH && u.authDataU==publicKey then
+	u);;
+	
+//-------------- commands
+fun userInfo(cnx, u)=
+	cnxEchoLn(cnx, strFormat("login   : *", u.loginU));
+	cnxEchoLn(cnx, strFormat("authMode: *", u.authModeU));
+	cnxEchoLn(cnx, strFormat("rights  : *", strJoin(":", u.rightsU)));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdSelf(cnx)=
+	if cnx.userC==nil then (
+		cnxEchoLn(cnx, "user not logged in");
+		cnxEchoLn(cnx, "OK")
+	)
+	else userInfo(cnx, cnx.userC);;
+
+fun cmdLogout(cnx) =
+	set cnx.userC=nil;
+	set cnx.lastResultC=nil;
+	set cnx.bufferC=nil;
+	set cnx.bufferStopPatternC=nil;
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdLogon(cnx, login, password)= 
+	if cnx.userC<>nil then abortWithMsg("NOK: Logout first!")
+	else
+	let userLogonWithPassword(login, password) -> u in
+	if u==nil then abortWithMsg("NOK: Authentication failed")
+	else (
+		set cnx.userC=u;
+		cnxEchoLn(cnx, "Access granted");
+		cnxEchoLn(cnx, "OK")
+	);;
+
+fun cmdPassword(cnx, oldPassword, newPassword) = masterSync(lambda ()=
+	let cnx.userC -> u in
+	if !userCheckPassword(u, oldPassword) then abortWithMsg("NOK: Permission denied")
+	else (
+		userSave(userSetAuthModePassword(newPassword, u));
+		cnxEchoLn(cnx, "OK")
+	));;
+
+//---- admin commands
+fun _cmdAdminUser(cnx, login, right)=	// check right and locate
+	if !userCheckRights(cnx.userC, right) then abortWithMsg("NOK: Permission denied")
+	else 
+	userLoad(login);;
+
+fun cmdUsers(cnx)=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_USERS_INFO) then abortWithMsg("NOK: Permission denied")
+	else 
+		let fileList(PATH_USERS) -> loginList in
+		let quicksort(loginList, lambda(a, b)= 0>strCmp(a, b)) -> sortedloginList in (
+			for login in sortedloginList do cnxEchoLn(cnx, strFormat("- *", strTail(login, strLength(PATH_USERS))));
+			cnxEchoLn(cnx, "OK")
+		)
+	;;
+
+fun cmdUserInfo(cnx, login)= masterSync(lambda ()=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_USERS_INFO) then abortWithMsg("NOK: Permission denied")
+	else
+	userInfo(cnx, userLoad(login)));;
+
+fun cmdAddUser(cnx, login)= masterSync(lambda ()=
+	if !userCheckRights(cnx.userC, RIGHTS_ADMIN_USERS_ADD) then abortWithMsg("NOK: Permission denied")
+	else
+	if !loginCheck(login) then abortWithMsg("NOK: Wrong login syntax")
+	else
+	if userExists(login) then abortWithMsg("NOK: User exists already")
+	else (
+		userCreate(login);
+		cnxEchoLn(cnx, "OK")
+	));;
+
+fun cmdDelUser(cnx, login)= masterSync(lambda ()=
+	if login==cnx.userC.loginU || !userCheckRights(cnx.userC, RIGHTS_ADMIN_USERS_DELETE) then abortWithMsg("NOK: Permission denied")
+	else
+	let userLoad(login) -> u in (
+		save(nil, loginPath(login));
+		// we should save this list of deleted logins, so that we could reject pending connections based on this login
+		cnxEchoLn(cnx,  "OK")
+	));;
+
+fun cmdUserRights(cnx, login, rights) = masterSync(lambda ()=
+	if RIGHTS_MAX_LENGTH<strLength(rights) then abortWithMsg("NOK: rights exceeds size limit")
+	else 
+	let _cmdAdminUser(cnx, login, RIGHTS_ADMIN_USERS_UPDATE) -> u in (
+		userSave(userSetRights(rights, u));
+		cnxEchoLn(cnx, "OK")
+	));;
+
+fun cmdUserPassword(cnx, login, password) = masterSync(lambda ()=
+	let _cmdAdminUser(cnx, login, RIGHTS_ADMIN_USERS_ADD) -> u in (
+		userSave(userSetAuthModePassword(password, u));
+		cnxEchoLn(cnx, "OK")
+	));;
+
+fun cmdUserTLS(cnx, login)= masterSync(lambda ()=
+	let _cmdAdminUser(cnx, login, RIGHTS_ADMIN_USERS_ADD) -> u in (
+		userSave(userSetAuthModeTLS(u));
+		cnxEchoLn(cnx, "OK")
+	));;
+
+fun cmdUserSSH(cnx, login, publicKey)= masterSync(lambda ()=
+	let _cmdAdminUser(cnx, login, RIGHTS_ADMIN_USERS_ADD) -> u in (
+		userSave(userSetAuthModeSSH(u, publicKey));
+		cnxEchoLn(cnx, "OK")
+	));;

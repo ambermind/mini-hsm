@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+//----------------------- CNX
+
+fun cnxEcho(cnx, msg) = if !cnx.silentC then void call cnx.fReplyC(msg);;
+fun cnxEchoLn(cnx, msg) = if !cnx.silentC then void call cnx.fReplyC(strFormat("*\n", msg));;
+fun cnxEchoAlways(cnx, msg) = void call cnx.fReplyC(msg);;
+
+fun cnxSetResult(cnx, result) = set cnx.lastResultC=result;;
+
+fun cnxPromptString(cnx) = strFormat("\n*> ", cnx.userC.loginU);;
+
+fun cnxCreate(fReply) = [fReplyC=fReply];;
+fun cnxSetSilent(silent, cnx) = set cnx.silentC=silent; cnx;;
+fun cnxSetEcho(echoOnOff, cnx) = set cnx.echoC=echoOnOff; cnx;;
+fun cnxSetInteractive(interactive, cnx) = set cnx.interactiveC=interactive; cnx;;
+
+fun cnxProcessLine(cnx, line) =
+	if cnx.echoC && !strStartsWith(line, "silent") then (
+		cnxEcho(cnx, cnxPromptString(cnx));
+		cnxEchoLn(cnx, line)
+	);
+	cmdProcessLine(cnx, line);
+	if cnx.interactiveC then cnxEchoAlways(cnx, cnxPromptString(cnx));;
+
+fun cnxFlushInput(cnx)=
+	if !strEmpty(cnx.inputC) then cnxProcessLine(cnx, cnx.inputC);
+	void set cnx.inputC=nil;;
+
+fun cnxHandleInput(cnx, flush, input)=
+	if cnx.interactiveC then cnxEchoAlways(cnx, input);
+	set cnx.inputC = match input with
+		"\$7f" -> strLeft(cnx.inputC, (-1)),
+		_ -> strConcat(cnx.inputC, input);
+	let strCharPos(cnx.inputC, 10, 0) -> i in
+	if i<>nil then let strLeft(cnx.inputC, i) -> line in (
+		set cnx.inputC = strTail(cnx.inputC, i+1);
+		cnxProcessLine(cnx, line);
+		cnxHandleInput(cnx, flush, nil)
+	)
+	else
+	if flush then void cnxFlushInput(cnx);;
+
+

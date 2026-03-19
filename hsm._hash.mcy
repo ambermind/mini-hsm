@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+const HashTypes =
+	["BYTES_TO_KEY",lambda(msg, secret, length) = bytesToKey(msg, secret, length)]::	// secret is used as 'salt'
+	["MD5",         lambda(msg, secret, length) = md5(msg)]::
+	["SHA1",        lambda(msg, secret, length) = sha1(msg)]::
+	["SHA256",      lambda(msg, secret, length) = sha256(msg)]::
+	["SHA384",      lambda(msg, secret, length) = sha384(msg)]::
+	["SHA512",      lambda(msg, secret, length) = sha512(msg)]::
+	["HMAC_MD5",    lambda(msg, secret, length) = hmacMd5(secret, msg)]::
+	["HMAC_SHA1",   lambda(msg, secret, length) = hmacSha1(secret, msg)]::
+	["HMAC_SHA256", lambda(msg, secret, length) = hmacSha256(secret, msg)]::
+	["HMAC_SHA384", lambda(msg, secret, length) = hmacSha384(secret, msg)]::
+	["HMAC_SHA512", lambda(msg, secret, length) = hmacSha512(secret, msg)]::
+	nil;;
+const HashTypesHashmap = hashmapInit(4, HashTypes);;
+fun hashFromStr(hash) = abortWhenNil(hashmapGet(HashTypesHashmap, hash), "NOK: unknown hash");;
+
+fun hash(hashType, msg, secret, length) =
+	let hashFromStr(hashType) -> fHash in
+	let intFromDec(default(length, "24")) -> length in	// 24 as in pem files encrypted in DES-EDE3-CBC
+	call fHash(msg, secret, length);;
+
+//-------------- commands
+fun cmdHashTypes(cnx)=
+	for [hash, _] in HashTypes do cnxEchoLn(cnx, strFormat("- *", hash));
+	cnxEchoLn(cnx, "OK");;
+
+fun cmdHash(cnx, hashType, msg, secret, length)=
+	_cmdFinalizeResult(cnx, hash(hashType, msgFilter(cnx, msg), msgFilter(cnx, secret), length));;

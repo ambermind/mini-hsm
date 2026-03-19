@@ -1,0 +1,858 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2025, Sylvain Huet, Ambermind
+// Minimacy (r) MiniHSM
+
+fun cmdMan(cnx, man)=
+	cnxEchoLn(cnx, "------------------");
+	let if strEmpty(man) then "man" else man -> man in
+	cnxEchoLn(cnx, match man with
+	"man"->
+"This is the list of available commands.
+//---------supported crypto
+- keyTypes       : display the list of the supported types of key
+- signatures     : display the list of the supported signature algorithms 
+- curves         : display the list of the supported elliptic curves
+- schemes        : display the list of the supported encryption schemes
+- paddings       : display the list of the supported padding algorithms
+- encodings      : display the list of the supported encoding
+- hashTypes      : display the list of the supported hash algorithms
+//---------output formatting
+- silent         : activate silent mode
+- verbose        : deactivate silent mode
+- *              : print the last result
+- print          : print any string
+- date           : print the current date
+//---------buffer
+- bufferStart    : start buffering
+- bufferEnd      : end buffering and transfer buffer in '*' (last result)
+//---------user commands
+- self           : print information about current user
+- logon          : logon with password
+- logout         : logout
+- password       : change password
+//---------hash
+- hash           : hash a message
+//---------encode
+- encode         : encode a message
+- decode         : decode a message
+- randomBytes    : generate a random number of bytes
+//---------key commands
+- describe       : describe a key
+- createKey      : create a new key
+- delKey         : delete an existing key
+- publicKey      : print the public key associated to the key
+- importKey      : import a key from a DER or PEM content
+- importSSH      : import a ssh key
+- ecdh           : computes ecdh
+- pad            : pad a message
+- unpad          : unpad a message
+- sign           : sign a message
+- verify         : verify a signature
+- encrypt        : encrypt a message
+- decrypt        : decrypt a message
+- csr            : generate a CSR
+//---------admin commands
+- users          : print the list of users
+- userInfo       : get information about a specific user
+- keys           : print the list of keys
+- addUser        : create a new user
+- delUser        : delete an existing user
+- userRights     : set the rights for a specific user
+- userPassword   : set a user to password authentication
+- userSSH        : set a user to SSH authentication
+- userTLS        : set a user to TLS authentication
+- keyExport      : export a key as PEM file
+- keyExportPublic: export a public key as PEM file
+
+There are additional topics:
+- intro          : get started
+- connect        : connection modes
+- accounts       : user management
+- rights         : right management
+- crypto         : common operations
+- output         : how to format the output
+- config         : configuration
+- advanced       : advanced topics
+
+Type 'man COMMAND' (resp. 'man TOPIC') to get information about a specific COMMAND (resp. TOPIC).
+",
+	"intro" -> "
+INTRODUCTION
+
+Welcome to MiniHSM!
+
+MiniHSM is a Minimacy application that implements a powerful hsm-like application:
+- keep secret cryptographic keys safe from the outside world
+- allow multiple access: console, http/s, ssh
+- manage user right at a precise level
+
+It is possible to launch MiniHSM on top of an existing OS, such as Linux, Windows or MacOS. However be aware that all secrets are stored as regular files on the host file system.
+Therefore, your secrets will be safe only if you no-one except you can access these filets.
+On another hand you can launch MiniHSM on a baremetal Minimacy target, such as MM-2350. Then the only way to steal the secrets will be to unsold the flash component.
+
+At startup, when no user exists with login 'admin', it is created as a password based account with password 'admin'. See topic 'accounts'.
+The default configuration only opens a console access to MiniHSM, and try to logon as 'admin' user. This can be changed, see topic 'config'.
+
+You should get this message:
+	MiniHSM - 2025 - Sylvain Huet
+	Type 'man' to access manual
+	OK
+	Access granted
+	OK
+	> Please change the admin password!
+	admin>
+
+Then you may type commands. Type 'man' to get the list of available commands, and type 'man COMMAND' to get information about a specific COMMAND.
+Each command is made of words. Words may have 3 types:
+- a simple string: command name, key name, user login, algorithm name
+- a standard message: as cryptography manipulates binary data, standard messages are encoded as hexadecimal. 'Hello' should be typed as: 48656c6c6f.
+- an ascii message: in some situation it is convenient to type the message as an ascii string. Just type it within double-quotes: \"Hello\", and use \\ to escape special characters.
+
+On the console, type a command then press 'Enter': the full line is sent to MiniHSM.
+	admin> randomBytes 24
+	58fa244e2d72c48b3dc98d6b8fbf8f9a6adcb3bee64452e9
+	OK
+
+It is possible to merge multiple commands on a single line, just insert semi-colon, with at least a space before and after.
+	admin> randomBytes 24 ; randomBytes 16
+	49a0afa210c08eeb1d1b9aa8a20e73bd8abe01b2441d7f27
+	OK
+	57573b5b49c491311bdcb2d5409981f7
+	OK
+
+From then you should:
+- change the admin authentication mode. See topic 'accounts'.
+- create and use keys.
+- create new users.
+",
+"connect" -> "
+CONNECTIONS
+
+There are different ways to connect:
+- console
+- http(s)
+- ssh
+
+console:
+- opened locally on the host
+
+http(s): http://127.0.0.1:8080/?batch=logon+admin+admin%0Akeys%0Ausers+;+keys
+- the 'batch' argument (query or post) is used a the list of commands to send to MiniHSM
+- the repy is in text/plain
+
+ssh has 3 modes:
+- interactive: ssh -p 1234 admin@127.0.0.1
+=> similar to console, but from remote access. Type Ctr-C or Ctr-D to close the connection.
+
+- exec: ssh -p 1234 admin@127.0.0.1 keys
+=> only one command line per ssh connection
+
+- bath: ssh -p 1234 admin@127.0.0.1 < batch.txt
+=> a batch file (one command per line) per ssh connection
+",
+"accounts" -> "
+ACCOUNTS
+
+Each user should have at least one specific account. One real user may have different accounts for different connection types and/or different rights.
+Each account is defined by:
+- a unique login
+- an authentication mode (only one for a specified login)
+- a list of rights
+
+Login:
+- any name containing only alphanumerical characters plus '_', '-' or '.'. Regexp: ^[\\w_-\\.]+$
+- at most 64 characters
+
+Authentication mode:
+- none: no authentication mode yet
+- password: password based
+- TLS: a client certificate signed by the server TLS_LOGIN_CER certificate. See topic 'config'.
+- SSH publicKey: a public key detained by the server
+
+Right:
+- a list of access rights. See topic 'rights'.
+
+When a user is created with the command 'addUser', it is initialized with:
+- the specified login
+- 'none' authentication mode
+- no right
+
+It is then required to select an authentication mode, using commands 'userPassword', 'userTLS' or 'userSSH'.
+Then the admin may define his/her rights with command 'userRights'.
+The admin may change the authentication mode at any time, but only one authentication at a time for a specific login.
+",
+"rights" -> "
+RIGHTS
+
+Most operations have a restricted access. This access is defined as a path. For example:
+- to create a new user: /admin/users/create
+- to sign with a key named 'FOOBAR': /keys/FOOBAR/use/private/sign
+
+Some operations may have several access paths. For example, to describe a key:
+- /keys/KEY_NAME/use/describe
+- /admin/keys/
+There is an implicit OR between these rights. The user is allowed when meeting at least one of these rights.
+
+Each user is associated with a set of right paths. The rule is the following:
+	To be allowed to perform an operation,
+	at least one of the user's right paths must be a prefix of one of the operation access path.
+
+In the previous example, the user may have the right path:
+- '/keys/KEY_NAME/user/describe': access right dedicated to this operation
+- '/keys/KEY_NAME/': access right to any operation concerning the key KEY_NAME
+- '/admin/': access right to any admin operation
+- '/': this is the 'superadmin' prefix, this gives access to all operations. Use with care.
+",
+"crypto" -> "
+CRYPTOGRAPHY EXAMPLES
+
+In this section, we show some examples of cryptographic operations. To understand these examples:
+- remind that the standard form of messages is hexadecimal. But we can use ascii within double-quotes
+- '*' is a replacement for the last cryptographic command, it allows to chain commands without having to copy the last result in the next command line
+
+Create an aes 256 key named 'aes1', and use it to encrypt then decrypt the ascii message 'Foobar':
+	alice> createKey aes1 AES
+	OK
+	alice> pad aes1 \"Foobar\"
+	466f6f6261720a0a0a0a0a0a0a0a0a0a
+	OK
+	alice> encrypt aes1 * CBC
+	9962c1b859d6390b4a4d92c2e3df59ff
+	OK
+	alice> decrypt aes1 * CBC
+	466f6f6261720a0a0a0a0a0a0a0a0a0a
+	OK
+	alice> unpad aes1 *
+	466f6f626172
+	OK
+	alice> encode ASCII *
+	\"Foobar\"
+	OK
+
+Create an ed25519 key named 'ed1', and use it to sign then verify the ascii message 'Foobar':
+	alice> createKey ed1 ED25519
+	OK
+	alice> sign ed1 \"Foobar\"
+	860400d61cd7a8ab586bde3a6e303594ce6b55989b4e02f5a46d1889b6711ebe2f754df700d3b78046b7ed97b896577095683cc623aa178861d34ecf30ea900b
+	OK
+	alice> verify ed1 \"Foobar\" *
+	YES
+	OK
+
+Hash a message with sha256:
+	alice> hash SHA256 \"Foobar\"
+	e811818f80d9c3c22d577ba83d6196788e553bb408535bb42105cdff726a60ab
+
+Encode/decode in base64:
+	alice> encode BASE64 \"Foobar\"
+	\"Rm9vYmFy\"
+	OK
+	> decode BASE64 *
+	466f6f626172
+	OK
+	alice> encode ASCII *
+	\"Foobar\"
+	OK
+
+Create an EC key named 'ec1', export the publicKey and import it as new key 'ec1pub'. Then use ec1 to sign a message and ec1pub to verify it.
+	alice> createKey ec1 EC
+	OK
+	alice> publicKey ec1
+	3059301306072a8648ce3d020106082a8648ce3d03010703420004eb4754cbe0676786260121c3513b304e5e7dab49340fb57bb507fb90b776a09845a78e8c3713d5bf471a1269b32901ad55c4f4368193fc1814c2f4bfb959a0bf
+	OK
+	alice> importKey ec1pub *
+	OK
+	alice> sign ec1 \"Foobar\"
+	3046022100e7904ece6c90b8c7e59df015446b548f55b800a90c804ecaf7fe1f626e16e86a022100c110d4e92db64aa7d9c460132fae6a1b642d5904260a446a93fba7f2a64ed26b
+	OK
+	alice> verify ec1pub \"Foobar\" *
+	YES
+	OK
+",
+"output" -> "
+OUTPUT
+
+The default output is always modeled from the interactive mode. Even in http mode or ssh exec or batch mode, the prompt and the command is displayed in the output.
+In some occasion, you need a formatted output so that it will be easier for the client application of MiniHSM to parse the result.
+The 'silent' mode is designed for this purpose. It won't work properly when not in interactive mode: it works well in http request, ssh exec or ssh batch.
+
+An XML example:
+	silent
+	print \"<reply><date>\"
+	date
+	print \"</date><random>\"
+	randomBytes 8
+	*
+	print \"</random></reply>\"
+This will output only: 
+	<reply><date>Wed, 01 Oct 2025 18:39:26 UTC</date><random>5a012043c1a75538</random></reply>
+
+The reason is that in 'silent' mode, only two commands will actually output data:
+- print: output any ascii string
+- *: output the result of the last cryptographic command (excluding key management, user management, list of algorithms, ...)
+Obviously the 'silent' command must be called first.
+",
+"config" -> "
+CONFIGURATION
+
+The MiniHSM configuration is defined in hsm.config.mcy. It is a *.mcy file, so follow the Minimacy language syntax. Learn once, use everywhere.
+The main goal of the configuration is to define the access modes. You may enable or disable each of them separately by defining the value of these 3 constants:
+- CONSOLE_ENABLED
+- HTTP_ENABLED
+- SSH_ENABLED
+
+HTTP(S) configuration is defined further with these constants:
+- HTTP_ADDR: local IP address of the server on which the HTTP server will be bound. Set '0.0.0.0' to open on every local IP addresses.
+- HTTP_PORT: port number. On unix-like systems, port under 1024 require 'root' priviledge. See HOST_USER config later in this page.
+- HTTP_TIMEOUT: timeout of an inactive HTPP connection. HTTP1.1 protocol allows to reuse a connection for consecutive HTTP requests, preventing from renegotiating TLS sessions.
+For HTTP this is all.
+For HTTPS (aka TLS), there are more constants:
+- TLS_SERVER_KEY: the PEM file name for the server certificate
+- TLS_SERVER_KEY_PWD: the password of the TLS_SERVER_KEY when encrypted
+- TLS_SERVER_CER: the PEM file name containing the chain of servers certificates
+- TLS_LOGIN_CER: the PEM file name containing the authority certificate, used to sign the client certificates for TLS authentication mode.
+
+SSH configuration is defined further with these constants:
+- SSH_ADDR: local IP address of the server on which the SSH server will be bound.  Set '0.0.0.0' to open on every local IP addresses.
+- SSH_PORT: port number. On unix-like systems, port under 1024 require 'root' priviledge. See HOST_USER config later in this page.
+- SSH_SERVER_KEY: the PEM file containing the server key
+- SSH_SERVER_KEY_PWD: the password of the SSH_SERVER_KEY when encrypted
+
+- HOST_USER:
+On unix-like systems, we need root priviledge to start servers on ports under 1024. However, once started, we usually prefer to switch to a less priviledged user.
+These systems allow this with system calls to setuid() and setgid().
+This HOST_USER constant is expected to contain a username (or login), and corresponding calls to setuid() and setgid().
+Leave empty when not using.
+",
+	"advanced" -> "
+ADVANCED TOPICS
+
+- Storage
+Each key is stored in a file in directory './keys/'
+Each user is defined in a file in directory './users/'
+
+- Master Key
+Secrets, especially keys, are not stored in clear in directory './keys/'. The key is encrypted with the Master Key, following a AES-256-CBC scheme.
+The Master Key is stored in file './MasterKey'. It is generated at the first launch.
+When launched on a OS-based host, it is possible to change the owner of this file, so that only the MiniHSM dedicated user will have access to it.
+",
+	"keyTypes" -> "
+keyTypes
+
+Display the list of available types of keys. For example:
+> keyTypes
+- AES
+- DES
+- DES3
+- EC
+- ED25519
+- RSA
+- X25519
+",
+	"signatures" -> "
+signatures
+
+Display the list of available signatures. For example:
+> signatures
+- ECDSA_SECP256R1_SHA256
+- ECDSA_SECP384R1_SHA384
+- ED25519
+- ED25519PH
+- RSA_PKCS1_SHA1
+- RSA_PKCS1_SHA256
+- RSA_PKCS1_SHA384
+- RSA_PKCS1_SHA512
+- RSA_PSS_RSAE_SHA256
+- RSA_PSS_RSAE_SHA384
+- RSA_PSS_RSAE_SHA512
+",
+	"curves" -> "
+curves
+
+Display the list of available curves. For example:
+> curves
+- curve25519
+- secp256k1
+- secp256r1
+- secp384r1
+- secp521r1
+",
+	"schemes" -> "
+schemes
+
+Display the list of available encryption schemes. For example:
+> schemes
+- CBC
+- CMAC
+- ECB
+- OAEP
+- PKCS1
+",
+	"paddings" -> "
+paddings
+
+Display the list of available paddings. For example:
+> paddings
+- ANSI_X9_23
+- ISO_10126
+- ISO_7816_4
+- PKCS_5
+- TLS
+",
+	"encodings" -> "
+encodings
+
+Display the list of available encodings. For example:
+> encodings
+- ASCII
+- BASE64
+- BASE64URL
+- HEX
+",
+	"hashTypes" -> "
+hashTypes
+
+Display the list of available hashTypes. For example:
+> hashTypes
+- MD5
+- SHA1
+- SHA256
+- SHA384
+- SHA512
+- HMAC_MD5
+- HMAC_SHA1
+- HMAC_SHA256
+- HMAC_SHA384
+- HMAC_SHA512
+",
+
+	"silent" -> "
+silent
+
+Switch to silent mode. In silent mode, only 3 commands will really output data:
+- *    : output the last result
+- print: output any string
+- date : output current time
+
+Then it is possible to build a batch of commands with a clean output, for example to simplify the parsing of the result by the client software.
+For example:
+silent
+print \"sha256 of Hello is <\"
+hash SHA256 \"Hello\"
+*
+print \">\"
+
+The output will contain only: sha256 of Hello is <185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969>
+In interactive mode (console or ssh terminal), this will not produce the expected result as the prompt and commands are echoed.
+
+See 'verbose' to exit the silent mode.
+",
+	"verbose" -> "
+verbose
+
+Quit the silent mode. See 'silent'.
+",
+	"*" -> "
+*
+
+Display the last cryptographic result, event in 'silent' mode. For example:
+> hash SHA256 \"Hello\"
+185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969
+OK
+
+> *
+185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969
+OK
+
+Sometimes the last result is an ASCII string:
+- command date: \"Sun, 21 Sep 2025 14:50:54 UTC\"
+- command verify: \"YES\" or \"NO\"
+When in silent mode the ASCII string is displayed in ASCII, without double-quotes and without escape sequences
+When not in silent mode the ASCII string is displayed within double-quotes and with escape sequences.
+",
+	"print" -> "
+print MESSAGE
+
+Display the message. See 'silent'.
+",
+	"date" -> "
+date
+
+Display the current date of the HSM.
+",
+
+	"bufferStart" -> "
+bufferStart [PATTERN]
+
+Start the buffering of the input. This is mostly used when one wants to import a PEM key: we need to input a multiline ascii text, and use it as a whole with the command 'importKey'.
+'bufferStart' begins the beginning. Each prompted line is added to the internal buffer, until the command 'bufferEnd' which moves the buffer content to the last result register '*' as an ascii string.
+
+For example, we can import a private key like this:
+alice> bufferStart
+OK
+alice> -----BEGIN PRIVATE KEY-----
+alice> MC4CAQAwBQYDK2VwBCIEILLrOpGWkLReRqFBXpB4zJojIs5unebIsornrSlWJmUE
+alice> -----END PRIVATE KEY-----
+alice> bufferEnd
+OK
+alice> *
+\"-----BEGIN PRIVATE KEY-----\\nMC4CAQAwBQYDK2VwBCIEILLrOpGWkLReRqFBXpB4zJojIs5unebIsornrSlWJmUE\\n-----END PRIVATE KEY-----\"
+OK
+alice> importKey ed25519PEM *
+alice> describe ed25519PEM
+- ed25519PEM: Sat, 20 Sep 2025 20:52:35 UTC; alice; ED25519 PRIVATE
+
+To prevent the unlikely case when we would input a line starting with 'bufferEnd', we can specify a PATTERN in bufferStart. Then only the command 'bufferEnd PATTERN' with the same pattern will be considered to stop the buffering.
+",
+	"bufferEnd" -> "
+bufferEnd PATTERN
+
+End the buffering. See 'bufferStart'
+",
+
+	"self" -> "
+self
+
+Show information about myself. For example:
+> self
+login   : admin
+authMode: password
+rights  : /
+",
+	"logon" -> "
+logon LOGIN PASSWORD
+
+Logon with password.
+",
+	"logout" -> "
+logout
+
+Logout. The connection becomes unauthenticated, without any right. It is then possible to use the command 'logon'.
+",
+	"password" -> "
+password OLD_PASSWORD NEW_PASSWORD
+
+Change the current user password. It requires that the authentication mode is already 'password'.
+Only an administrator may change the authentication mode of a user.
+",
+
+	"hash" -> "
+hash HASH_TYPE MESSAGE [SECRET]
+
+Computes the hash of MESSAGE using the algorithm HASH_TYPE. See 'hashTypes' to list the supported hash algorithms.
+The SECRET is only used for HMAC algorithms.
+",
+	"encode" -> "
+encode ENCODING MESSAGE
+
+Encodes the MESSAGE using the provided ENCODING. See 'encodings' to list the supported encodings.
+",
+	"decode" -> "
+decode ENCODING MESSAGE
+
+Decodes the MESSAGE using the provided ENCODING. See 'encodings' to list the supported encodings.
+Note that the decoding of a MESSAGE is implicit when MESSAGE is an hexadecimal string or an ASCII string (within double-quotes).
+Therefore, there is no need for a 'decode HEX' or 'decode ASCII' function.
+",
+	"randomBytes" -> "
+randomBytes COUNT
+
+Generate a random string of length COUNT.
+",
+	"describe" -> "
+describe KEY_NAME
+
+Print the description of a key. Format is : - name: creation time; user; key description.
+
+For example:
+> describe aesTestKey
+- aesTestKey: Sat, 20 Sep 2025 11:15:43 UTC; admin; AES 192
+
+aesTestKey is a 192 bits AES key, created on 20 Sep 2025 by user 'admin'.
+
+Required rights:
+- /keys/KEY_NAME/use/describe
+- /admin/keys/
+",
+	"createKey" -> "
+createKey KEY_NAME TYPE [OPTION]
+
+Create a key with KEY_NAME and TYPE. See command 'keyTypes' to list the supported types.
+OPTION depends on the type:
+- AES: OPTION is the size of the key (128, 192, 256). Default is 256.
+- EC : OPTION is the name of the elliptic curve. Default is secp256r1.
+- RSA: OPTION is the size of the key. Default is 1024.
+
+Required rights:
+- /admin/keys/create
+",
+	"delKey" -> "
+delKey KEY_NAME
+
+Delete the key. Watch out: no confirmation, no going back.
+
+Required rights:
+- /admin/keys/delete
+",
+	"publicKey" -> "
+publicKey KEY_NAME
+
+Display the public key associated to key KEY_NAME. The output is hexadecimal DER format.
+
+Required rights:
+- /keys/KEY_NAME/use/public/read
+- /admin/keys/
+",
+	"importKey" -> "
+importKey KEY_NAME INPUT
+
+Create a new key KEY_NAME based on INPUT.
+INPUT may be:
+- an hexadecimal DER content
+- a PEM string (see bufferStart and bufferEnd to see how to get an Ascii multiline input)
+
+This function makes it simple to create a public key from an existing private key:
+createKey SecretKey RSA 1024
+publicKey SecretKey
+importKey PublicKey *
+
+Required rights:
+- /admin/keys/create
+",
+	"importSSH" -> "
+importSSH KEY_NAME CONTENT
+
+Create a new key KEY_NAME from a SSH public key. Content is expected to be base64 encoded.
+
+Required rights:
+- /admin/keys/create
+",
+	"ecdh" -> "
+ecdh KEY_NAME PUBLIC_KEY
+
+Computes the ecdh from the private local key KEY_NAME and an external public key content (encoded as DER).
+Ecdh provides a way to generate a shared secret between two users without revealing any secret.
+
+For example:
+// create x1 key
+createKey x1 X25519
+// create x2 key
+createKey x2 X25519
+// export x1 public key
+publicKey x1
+// compute ecdh(x2, publicKey(x1))
+ecdh x2 *
+// export x1 public key
+publicKey x2
+// compute ecdh(x1, publicKey(x2))
+ecdh x1 *
+
+Both ecdh values should be identical.
+
+Required rights:
+- /keys/KEY_NAME/use/private/ecdh
+- /admin/keys/
+",
+	"sign" -> "
+sign KEY_NAME MESSAGE [ALGORITHM [CONTEXT]]
+
+Sign a MESSAGE with the private key KEY_NAME.
+ALGORITHM depends on the type of key. See command 'algos' to list the supported algorithms.
+- EC     : default ALGORITHM is ECDSA_SECP256R1_SHA256
+- ED25519: default is ED25519. Also available is ED25519PH, with an optional CONTEXT message
+- RSA    : default ALGORITHM is RSA_PKCS1_SHA256
+
+Required rights:
+- /keys/KEY_NAME/use/private/sign
+- /admin/keys/
+",
+	"verify" -> "
+verify KEY_NAME MESSAGE SIGNATURE [ALGORITHM [CONTEXT]]
+
+Verify a signature with the public key of KEY_NAME.
+ALGORITHM depends on the type of key. See command 'algos' to list the supported algorithms.
+- EC     : default ALGORITHM is ECDSA_SECP256R1_SHA256
+- ED25519: default is ED25519. Also available is ED25519PH, with an optional CONTEXT message
+- RSA    : default ALGORITHM is RSA_PKCS1_SHA256
+
+The result is YES or NO.
+
+Required rights:
+- /keys/KEY_NAME/use/public/verify
+- /admin/keys/
+",
+	"csr" -> "
+csr KEY_NAME SUBJECT
+
+Generate a CSR file with SUBJECT and signed with key KEY_NAME. Therefore the key must be private.
+SUBJECT is an ascii string such as \"/CN=FOO/O=BAR\". It starts with the separator character ('/' in this example).
+
+Depending on the key type, the signature algorithm is: RSA_PKCS1_SHA512, ECDSA_SECP256R1_SHA256 or ED25519.
+
+Required rights:
+- /keys/KEY_NAME/use/private/sign
+- /admin/keys/
+",
+	"pad" -> "
+pad KEY_NAME MESSAGE [PADDING]
+
+Pad a message before encryption with the key KEY_NAME.
+See command 'paddings' to list the supported padding. Default is PKCS_5.
+
+Required rights:
+- /keys/KEY_NAME/use/describe
+- /admin/keys/
+",
+	"unpad" -> "
+unpad KEY_NAME MESSAGE [PADDING]
+
+Unpad a message after decryption with the key KEY_NAME.
+See command 'paddings' to list the supported padding. Default is PKCS_5.
+
+Required rights:
+- /keys/KEY_NAME/use/describe
+- /admin/keys/
+",
+	"encrypt" -> "
+encrypt KEY_NAME MESSAGE [SCHEME [CONTEXT]]
+
+Encrypt a message with the key KEY_NAME.
+SCHEME depends on the type of key:
+- RSA : PKCS1 (default) or OAEP.  Encryption is computed with the private key.
+- AES : ECB (default) or CBC (then CONTEXT is considered a IV). MESSAGE is supposed already padded (see 'pad')
+
+For 'CMAC' scheme, the key should be AES and the message doesn't need to be padded.
+
+Required rights:
+- /keys/KEY_NAME/use/private/encrypt
+- /admin/keys/
+",
+	"decrypt" -> "
+decrypt KEY_NAME MESSAGE [SCHEME [CONTEXT]]
+
+Decrypt a message with key KEY_NAME.
+SCHEME depends on the type of key:
+- RSA : PKCS1 (default) or OAEP. Decryption is computed with the public key.
+- AES : ECB (default) or CBC (then CONTEXT is considered a IV). Result should need to be unpadded further (see 'unpad')
+
+There is not decryption for 'CMAC' scheme.
+
+Required rights:
+- /keys/KEY_NAME/use/public/decrypt
+- /admin/keys/
+",
+	"users" -> "
+users
+
+Print the list of users
+
+Required rights:
+- /admin/users/info
+",
+	"userInfo" -> "
+userInfo USER
+
+Print information about a user. For example:
+> userInfo foobar
+login   : foobar
+authMode: ssh
+rights  : /
+
+Required rights:
+- /admin/users/info
+",
+	"keys" -> "
+keys
+
+Print the list of keys, in the same format than command 'describe'.
+
+Required rights:
+- /admin/keys/
+",
+	"addUser" -> "
+addUser LOGIN
+
+Create a new user associated to LOGIN. Once done, it is required to select an authentication mode (see userPassword, userSSH and userTLS) and define the rights (see userRights).
+
+Required rights:
+- /admin/users/create
+",
+	"delUser" -> "
+delUser LOGIN
+
+Delete an existing user. Watch out: no confirmation, no going back.
+
+Required rights:
+- /admin/users/delete
+",
+	"userRights" -> "
+userRights LOGIN RIGHTS
+
+Set the rights for user LOGIN.
+Rights are defined by absolute paths in the 'rights' tree. A user may combine several rights, separated with ':'.
+Each action is associated to one or many path. A user is allowed to perform an operation if one of its rights is the prefix of one of the rights required for the action.
+Example of rights:
+/ : full right (admin)
+/admin/users/: right to administrate users
+/keys/KEY_NAME/use/public/read: right to read the public key of KEY_NAME
+/keys/KEY_NAME/use/private/sign: right to sign with the private key of KEY_NAME
+
+Required rights:
+- /admin/users/update
+",
+	"userPassword" -> "
+userPassword LOGIN PASSWORD
+
+Set the password for LOGIN user and define his/her authentication mode as 'password'.
+
+Required rights:
+- /admin/users/update
+",
+	"userSSH" -> "
+userSSH LOGIN SSH_PUBLIC_KEY
+
+Set the public key for LOGIN user and define his/her authentication mode as 'ssh'.
+The public key is expected to be encoded in base 64, such as is the usual 'id_rsa.pub' files, but only the base 64 part is to be used.
+
+For example:
+userSSH foobar AAAAC3NzaC1lZDI1NTE5AAAAIBkRUQrg+i+STX6A6XTMRthZ2OoRWmNDczBECr7j+hlt
+
+Required rights:
+- /admin/users/update
+",
+	"userTLS" -> "
+userTLS LOGIN
+
+Set the authentication mode for LOGIN user as 'tls' (aka https access)
+It requires that the user LOGIN got a user certificate from the hsm administrator:
+- the certificate must contain CN=[LOGIN]
+- it has been signed by the host certificate defined as TLS_LOGIN_CER in hsm.config.
+
+Required rights:
+- /admin/users/update
+",
+	"keyExport" -> "
+keyExport KEY_NAME [PASSWORD]
+
+Export the key as a PEM file.
+PASSWORD is required when the key contains a private key, and is used to encode a PEM of type 'ENCRYPTED PRIVATE KEY'. PASSWORD is expected to have at least 8 characters.
+When the key contains only the public key, PASSWORD is ignored.
+
+PEM standard format doesn't manage symmetric keys, such as AES. In order to facilitate the export/import of symmetric keys, the Hsm extends PEM private key format.
+It is modeled after X25519 and ED25519 key formats, simply changing the encryption OID code to one of the followings: DES_CBC, DES_3CBC, AES128_CBC, AES192_CBC, AES256_CBC.
+These symmetric keys are considered as 'private' keys.
+
+Required rights:
+- /admin/keys/private/export
+",
+	"keyExportPublic" -> "
+keyExportPublic KEY_NAME
+
+Export the public key as a PEM file.
+When the key doesn't contain a private key, it is equivalent to keyExport.
+
+Required rights:
+- /admin/keys/public/export
+",
+	_ -> strFormat("No manual for *", man));
+	cnxEchoLn(cnx, "OK");;

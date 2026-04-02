@@ -127,7 +127,7 @@ fun keyDecryptAes(ext, msg, scheme, context)=
 
 fun keyLoadExtAes(data)= aesKey data;;
 fun keyCreateAes(option) =
-	let default(intFromDec(option), 256) -> size in
+	let default(intFromStr(option), 256) -> size in
 	if size==128 || size==192 || size==256 then	strRand(size/8)
 	else abortWithMsg("NOK: wrong key size");;
 
@@ -255,7 +255,7 @@ fun keyDecryptRsa(ext, msg, scheme, context)=
 
 fun keyLoadExtRsa(data)= keyFromDER(data, nil);;
 fun keyCreateRsa(option)=
-	let intFromDec(option) -> size in
+	let intFromStr(option) -> size in
 	let if size>0 then size else 1024 -> size in
 	derFromPrivateKey(rsaKey rsaCreate(size, nil));;
 

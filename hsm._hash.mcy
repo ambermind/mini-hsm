@@ -20,7 +20,7 @@ fun hashFromStr(hash) = abortWhenNil(hashmapGet(HashTypesHashmap, hash), "NOK: u
 
 fun hash(hashType, msg, secret, length) =
 	let hashFromStr(hashType) -> fHash in
-	let intFromDec(default(length, "24")) -> length in	// 24 as in pem files encrypted in DES-EDE3-CBC
+	let intFromStr(default(length, "24")) -> length in	// 24 as in pem files encrypted in DES-EDE3-CBC
 	call fHash(msg, secret, length);;
 
 //-------------- commands

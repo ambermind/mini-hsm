@@ -45,5 +45,5 @@ fun cmdDecode(cnx, encoding, msg)=
 	_cmdFinalizeResult(cnx, decode(encoding, msgFilter(cnx, msg)));;
 
 fun cmdRandomBytes(cnx, byteCount) =
-	let intFromDec(byteCount) -> nb in
+	let intFromStr(byteCount) -> nb in
 	_cmdFinalizeResult(cnx, strRand(nb));;

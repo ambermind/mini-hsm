@@ -4,7 +4,9 @@ const HOST_USER="foobar";;	// on linux-like system, the hsm will switch to this 
 const CONSOLE_ENABLED=true;;
 
 const HTTP_ENABLED=false;;
-const HTTP_TIMEOUT=30000;;
+const HTTP_MAX_CONNECTIONS=16;;
+const HTTP_IDLE_TIMEOUT=30;;
+const HTTP_EVICTION_TIMEOUT=10;;
 // HTTPS server:
 //const HTTP_ADDR="0.0.0.0";;
 //const HTTP_PORT=8443;;
@@ -20,8 +22,11 @@ const TLS_SERVER_KEY_PWD= "";;
 const TLS_SERVER_CER="";;
 const TLS_LOGIN_CER="";;
 
-const SSH_ENABLED=false;;
+const SSH_ENABLED=true;;
 const SSH_ADDR="0.0.0.0";;
 const SSH_PORT=1234;;
 const SSH_SERVER_KEY="ed25519_private.pem";;	//openssl genpkey -algorithm ed25519 -out ed25519_private.pem
 const SSH_SERVER_KEY_PWD="";;
+const SSH_MAX_CONNECTIONS=16;;
+const SSH_IDLE_TIMEOUT=60*10;;
+const SSH_EVICTION_TIMEOUT=10;;

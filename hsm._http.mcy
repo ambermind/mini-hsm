@@ -23,7 +23,7 @@ fun httpCertificateReload ()=
 	));;
 
 fun httpStart()=
-	set HttpSrv=httpSrvStartEx(httpLoadHostList(), HTTP_ADDR, HTTP_PORT, (lambda(h)=
+	set HttpSrv=httpSrvStartExt(httpLoadHostList(), HTTP_ADDR, HTTP_PORT, (lambda(h)=
 		httpSrvOnRequest(h, (lambda(verb, uri)=
 			httpSrvSetHeader(h, HTTP_CONTENT_TYPE, "text/plain");
 			let httpSrvParseArgs(h) -> [args, files] in
@@ -44,7 +44,8 @@ fun httpStart()=
 	if HttpSrv==nil then void echoLn strFormat("> Http server could not be started on *:*", HTTP_ADDR, HTTP_PORT)
 	else (
 		echoLn strFormat("> Http server started on *:*", HTTP_ADDR, HTTP_PORT);
-		httpSrvSetDefaultTimeout(HttpSrv, HTTP_TIMEOUT);
+		httpSrvSetDefaultIdleTimeout(HttpSrv, HTTP_IDLE_TIMEOUT);
+		httpSrvSetMaxConnections(HttpSrv, HTTP_MAX_CONNECTIONS, HTTP_EVICTION_TIMEOUT);
 		httpCertificateReload();
 		true
 	);;

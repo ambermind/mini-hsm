@@ -56,5 +56,7 @@ fun sshStart()=
 	if SshServer==nil then void echoLn strFormat("> SSH server could not be started on *:*", SSH_ADDR, SSH_PORT)
 	else (
 		echoLn strFormat("> SSH server started on *:*", SSH_ADDR, SSH_PORT);
+		shellServerSetIdleTimeout(SshServer, SSH_IDLE_TIMEOUT);
+		shellServerSetMaxConnections(SshServer, SSH_MAX_CONNECTIONS, SSH_EVICTION_TIMEOUT);
 		true
 	);;

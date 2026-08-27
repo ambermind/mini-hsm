@@ -53,7 +53,6 @@ const SignatureAlgosHashmap = hashmapInit(6, SignatureAlgos);;
 fun algoFromStr(algo) = abortWhenNil(hashmapGet(SignatureAlgosHashmap, algo), "NOK: unknown signature");;
 
 const Curves =
-	["curve25519",ecCurve25519()]::
 	["secp256k1", ecSecp256k1()]::
 	["secp256r1", ecSecp256r1()]::
 	["secp384r1", ecSecp384r1()]::
@@ -200,10 +199,10 @@ fun keyCreateEd25519(option) = derFromPrivateKey(ed25519Key ed25519Create());;
 fun keyDescribeX25519(ext)= if keyIsPrivate(ext) then "X25519 PRIVATE" else "X25519 PUBLIC";;
 fun keyPublicX25519(ext) = derFromPublicKey(ext);;
 fun keyEcdhX25519(ext, publicKey)=
-	x25519Ecdh(x25519FromKey(ext), x25519KeyPub(x25519FromKey(keyFromDER(publicKey, nil))));;
+	x25519Ecdh(x25519FromKey(ext), x25519Public(x25519FromKey(keyFromDER(publicKey, nil))));;
 
 fun keyLoadExtX25519(data)= keyFromDER(data, nil);;
-fun keyCreateX25519(option) = derFromPrivateKey(x25519Key x25519KeyPair(nil));;
+fun keyCreateX25519(option) = derFromPrivateKey(x25519Key x25519Create());;
 
 //------ EC
 fun keyDescribeEc(ext)=
@@ -212,7 +211,7 @@ fun keyDescribeEc(ext)=
 		if keyIsPrivate(ext) then "PRIVATE" else "PUBLIC");;
 fun keyPublicEc(ext) = derFromPublicKey(ext);;
 fun keyEcdhEc(ext, publicKey)=
-	ecEcdhStr(ecFromKey(ext), ecKeyPubStr(ecFromKey(keyFromDER(publicKey, nil))));;
+	ecEcdh(ecFromKey(ext), ecKeyPublic(ecFromKey(keyFromDER(publicKey, nil))));;
 
 fun keySignEc(ext, msg, algo, context) =
 	let algoFromStr(default(algo, "ECDSA_SECP256R1_SHA256")) -> algo in
@@ -224,7 +223,7 @@ fun keyVerifyEc(ext, msg, signature, algo, context) =
 fun keyLoadExtEc(data)= keyFromDER(data, nil);;
 fun keyCreateEc(curve)=
 	let curveFromStr(default(curve, "secp256r1")) -> curve in
-	derFromPrivateKey(ecKey ecCreate(curve));;
+	derFromPrivateKey(ecKey ecKeyCreate(curve));;
 
 //------ RSA
 fun keyDescribeRsa(ext)=

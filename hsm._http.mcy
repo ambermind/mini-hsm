@@ -33,7 +33,7 @@ fun httpStart()=
 			(
 				let httpSrvGetClientCertificateLogin(h) -> login in
 					if login<>nil then
-					let userLogonWithTLS(login) -> u in
+					let try userLogonWithTLS(login) -> u in
 					if u<>nil then set cnx.userC=u;
 				cnxHandleInput(cnx, true, batch);
 				strBuild(fifoList(fifo))

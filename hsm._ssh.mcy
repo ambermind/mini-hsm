@@ -37,7 +37,7 @@ fun sshWhenReady(h, cnx)=
 	true;;
 
 fun sshCheckAuth(h, authMode, login, authData)=
-	let cnxSetEcho(true, cnxCreate(lambda(val)= sshSendReply(h, val))) -> cnx in (
+	let cnxSetEcho(true, cnxCreate(lambda(val)= sshSendReply(h, val))) -> cnx in try (
 		if authMode=="password" then cmdLogon(cnx, login, authData);
 		if authMode=="publicKey" then
 			let userLogonWithSSH(login, authData) -> u in
